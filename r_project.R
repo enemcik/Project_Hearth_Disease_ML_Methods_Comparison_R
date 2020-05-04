@@ -1,0 +1,135 @@
+install.packages("openxlsx", dependencies = TRUE)
+install.packages("tidyr")
+install.packages("tidyverse")
+install.packages("cluster")
+install.packages("factoextra")
+install.packages("factoextra")
+install.packages("xgboost")
+install.packages("mltools")
+install.packages("DMwR")
+install.packages("neuralnet")
+install.packages("GGally")
+install.packages("caret")
+install.packages("DiagrammeR")
+install.packages("openxlsx")
+install.packages("party")
+install.packages('nnet')
+
+library(party)
+library(DiagrammeR)
+library(GGally)
+library(neuralnet)
+library(foreign)
+library(plyr)
+library(MASS)
+library(rms)
+library(ROCR)
+library(pROC)
+library(rpart)
+library(rattle)
+library(rpart.plot)
+library(RColorBrewer)
+library(e1071)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(tidyverse)
+library(cluster)
+library(factoextra)
+library(xgboost)
+library(Matrix)
+library(mltools)
+library(data.table)
+library(DMwR)
+library(zoo)
+library(caret)
+library(randomForest)
+library(nnet)
+
+####DATA HANDLING/INSPECTION
+data = read.csv("heart.csv")
+data = as.data.frame(data)
+head(data,5)
+
+data$sex = as.factor(data$sex) #gender
+data$cp = as.factor(data$cp) #chest pain
+data$fbs = as.factor(data$fbs) #fasting blood sugar
+data$restecg = as.factor(data$restecg) #resting ECG
+data$exang = as.factor(data$exang) # induced angina
+data$slope = as.factor(data$slope) #slope
+data$ca = as.factor(data$ca) #number of colored vessels
+data$thal = as.factor(data$thal) #thal
+
+
+str(data) #variables
+summary(data) #variable statistics
+sapply(data, sd)
+apply(data, 2, function(x) {sum(is.na(x))}) #NAs inspection, 0 present
+
+n = nrow(data) #shuffling the data
+data = data[sample(n),] 
+
+rand_rows = sample(1:nrow(data), 0.6*nrow(data)) #split into training and validation dataset
+train_data = data[rand_rows, ]
+val_data = data[-rand_rows, ]
+
+vars = colnames(data)[-length(colnames(data))] #creating a formula
+y = "target" 
+fmla = paste(y, paste(vars, collapse="+"),sep="~")
+fmla
+
+###LOGISTIC REGRESSION###
+logit = glm(fmla, data = train_data, family = "binomial")
+summary(logit)
+
+prob_log = predict(logit, val_data) #prediction
+pred_log = as.numeric(prob_log > 0.5)
+val_data$pred_log = pred_log
+confusionMatrix(table(val_data$target,val_data$pred_log), positive = "1")
+
+auc_log = auc(val_data$target, val_data$pred_log) #auc
+auc_log
+
+plot(roc(val_data$target, val_data$pred_log, direction="<"),
+     col="red", lwd=3, main="ROC")
+
+err_log = mean(pred_log != val_data$target) #error
+err_log
+
+###DECISION TREES###
+cart = rpart(fmla, data = train_data, method = 'class')
+summary(cart)
+rpart.plot(cart)
+
+prob_cart = predict(cart, val_data) #prediction
+pred_cart = as.numeric(prob_cart[,2] > 0.5)
+val_data$pred_cart = pred_cart
+confusionMatrix(table(val_data$target,val_data$pred_cart), positive = "1")
+
+auc_cart = auc(val_data$target, val_data$pred_cart) #auc
+auc_cart
+
+plot(roc(val_data$target, val_data$pred_cart, direction="<"),
+     col="red", lwd=3, main="ROC")
+
+err_cart = mean(pred_cart != val_data$target) #error
+err_cart
+
+###NEURAL NETWORKS###
+nn = nnet(target~ï..age+sex+cp+trestbps+chol+fbs+restecg+thalach
+          +exang+oldpeak+slope+ca+thal, data = train_data, size = 5, decay = 5e-4, maxit = 100)
+summary(nn)
+
+prob_nn = predict(nn, val_data)
+pred_nn = as.numeric(prob_nn > 0.5)
+val_data$pred_nn = pred_nn
+confusionMatrix(table(val_data$target,val_data$pred_nn), positive = "1")
+
+auc_nn = auc(val_data$target, val_data$pred_nn) #auc
+auc_nn
+
+plot(roc(val_data$target, val_data$pred_nn, direction="<"),
+     col="red", lwd=3, main="ROC")
+
+err_nn = mean(pred_nn != val_data$target) #error
+err_nn
