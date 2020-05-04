@@ -133,3 +133,46 @@ plot(roc(val_data$target, val_data$pred_nn, direction="<"),
 
 err_nn = mean(pred_nn != val_data$target) #error
 err_nn
+
+###GRADIENT BOOSTING###
+sparse_matrix = sparse.model.matrix(target ~ ., data = train_data)[,-1] #dummy contrast coding of categorical variables to fit the xgboost
+sparse_matrix_val = sparse.model.matrix(target ~ ., data = val_data[,colnames(train_data)])[,-1]
+
+labels = train_data$target
+
+bst = xgboost(data = sparse_matrix, label = labels, max_depth = 4,
+               eta = 1, nthread = 2, nrounds = 10,objective = "binary:logistic") #we should play with parameters
+
+importance = xgb.importance(feature_names = colnames(sparse_matrix), model = bst) #importance of features
+head(importance)
+
+prob_xgboost = predict(bst, sparse_matrix_val)
+pred_xgboost = as.numeric(prob_xgboost > 0.5)
+val_data$pred_xgboost = pred_xgboost
+confusionMatrix(table(val_data$target,val_data$pred_xgboost), positive = "1")
+
+auc_xgboost = auc(val_data$target, val_data$pred_xgboost) #auc
+auc_xgboost
+
+plot(roc(val_data$target, val_data$pred_xgboost, direction="<"),
+     col="red", lwd=3, main="ROC")
+
+err_xgboost = mean(pred_xgboost != val_data$target) #error
+err_xgboost
+
+###RANDOM FOREST###
+rf = randomForest(as.factor(target)~ï..age+sex+cp+trestbps+chol+fbs+restecg+thalach
+                  +exang+oldpeak+slope+ca+thal, data = train_data,ntree = 33, nodesize =7, importance = T, proximity = TRUE)
+
+pred_rf = predict(rf, val_data)
+val_data$pred_rf = as.numeric(pred_rf)
+confusionMatrix(table(val_data$target,val_data$pred_rf), positive = "1")
+
+auc_rf = auc(val_data$target,val_data$pred_rf) #auc
+auc_rf
+
+plot(roc(val_data$target, val_data$pred_rf, direction="<"),
+     col="red", lwd=3, main="ROC")
+
+err_rf = mean(pred_rf != val_data$target) #error
+err_rf
