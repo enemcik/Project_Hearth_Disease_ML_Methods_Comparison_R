@@ -65,6 +65,7 @@ str(data) #variables
 summary(data) #variable statistics
 sapply(data, sd)
 apply(data, 2, function(x) {sum(is.na(x))}) #NAs inspection, 0 present
+data_cv = data
 
 n = nrow(data) #shuffling the data
 data = data[sample(n),] 
@@ -176,3 +177,47 @@ plot(roc(val_data$target, val_data$pred_rf, direction="<"),
 
 err_rf = mean(pred_rf != val_data$target) #error
 err_rf
+
+###Cross-Validation
+k = 100
+acc_log = NULL
+acc_cart = NULL
+acc_nn = NULL
+acc_xgboost = NULL
+acc_rf = NULL
+set.seed(100)
+
+for (i in 1:k){ #sample randomly 100 times
+  n = nrow(data_cv)
+  data_temp = data_cv[sample(n),] 
+  rand_rows = sample(1:nrow(data_temp), 0.7*nrow(data_temp)) #split into training and validation dataset
+  train_data = data_temp[rand_rows, ]
+  val_data = data_temp[-rand_rows, ]
+  
+  ##LOGISTISTIC
+  logit = glm(fmla, data = train_data, family = "binomial")
+  try({
+    prob_log = predict(logit, val_data) #prediction
+    pred_log = as.numeric(prob_log > 0.5)
+    acc_log[i] = confusionMatrix(table(val_data$target,pred_log), positive = "1")$overall['Accuracy']
+  }, TRUE)
+  ##DECISION TREE
+  cart = rpart(fmla, data = train_data, method = 'class')
+  try({
+    prob_cart = predict(cart, val_data) #prediction
+    pred_cart = as.numeric(prob_cart[,2] > 0.5)
+    acc_cart[i] = confusionMatrix(table(val_data$target,pred_cart), positive = "1")$overall['Accuracy']
+  },TRUE)
+  ##NEURAL NET
+  nn = nnet(target~ï..age+sex+cp+trestbps+chol+fbs+restecg+thalach
+            +exang+oldpeak+slope+ca+thal, data = train_data, size = 5, decay = 5e-4, maxit = 100)
+  try({
+    prob_nn = predict(nn, val_data)
+    pred_nn = as.numeric(prob_nn > 0.5)
+    acc_nn[i] = confusionMatrix(table(val_data$target,pred_nn), positive = "1")$overall['Accuracy']
+  })
+}
+
+print(acc_log)
+print(acc_cart)
+print(acc_nn)
