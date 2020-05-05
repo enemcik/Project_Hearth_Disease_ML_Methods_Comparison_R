@@ -65,7 +65,7 @@ str(data) #variables
 summary(data) #variable statistics
 sapply(data, sd)
 apply(data, 2, function(x) {sum(is.na(x))}) #NAs inspection, 0 present
-data_cv = data
+data_cv = data #cross-validation
 
 n = nrow(data) #shuffling the data
 data = data[sample(n),] 
@@ -218,6 +218,6 @@ for (i in 1:k){ #sample randomly 100 times
   })
 }
 
-print(acc_log)
-print(acc_cart)
-print(acc_nn)
+print(mean(acc_log, na.rm = TRUE))
+print(mean(acc_cart, na.rm = TRUE))
+print(mean(acc_nn, na.rm = TRUE))
