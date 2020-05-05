@@ -83,6 +83,37 @@ fmla
 logit = glm(fmla, data = train_data, family = "binomial")
 summary(logit)
 
+#### alternative way using ROCR package####
+library(ROCR)
+prob_log = predict(logit, val_data, type = "response")
+pred = prediction(prob_log, val_data$target) #create a prediction object with true values and predicted ones
+
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr") #performance measure as ROC
+plot(roc.perf)
+
+auc.perf = performance(pred, measure = "auc") #performance measure AUC
+auc.perf@y.values
+
+opt.cut = function(perf, pred){
+  cut.ind = mapply(FUN=function(x, y, p){
+    d = (x - 0)^2 + (y-1)^2
+    ind = which(d == min(d))
+    c(sensitivity = y[[ind]], specificity = 1-x[[ind]], 
+      cutoff = p[[ind]])
+  }, perf@x.values, perf@y.values, pred@cutoffs)
+}
+print(opt.cut(roc.perf, pred)) #formula which finds "optimal" cutoff weighting both sensitivity and specificity equally (TPR and FPR)
+
+acc.perf = performance(pred, measure = "acc") # find best cutoff according to accuracy
+plot(acc.perf)
+
+ind = which.max( slot(acc.perf, "y.values")[[1]] )
+acc = slot(acc.perf, "y.values")[[1]][ind]
+cutoff = slot(acc.perf, "x.values")[[1]][ind]
+print(c(accuracy= acc, cutoff = cutoff))
+
+#### END alternative way using ROCR package####
+
 prob_log = predict(logit, val_data) #prediction
 pred_log = as.numeric(prob_log > 0.5)
 val_data$pred_log = pred_log
@@ -117,7 +148,7 @@ err_cart = mean(pred_cart != val_data$target) #error
 err_cart
 
 ###NEURAL NETWORKS###
-nn = nnet(target~ï..age+sex+cp+trestbps+chol+fbs+restecg+thalach
+nn = nnet(target~?..age+sex+cp+trestbps+chol+fbs+restecg+thalach
           +exang+oldpeak+slope+ca+thal, data = train_data, size = 5, decay = 5e-4, maxit = 100)
 summary(nn)
 
@@ -162,7 +193,7 @@ err_xgboost = mean(pred_xgboost != val_data$target) #error
 err_xgboost
 
 ###RANDOM FOREST###
-rf = randomForest(as.factor(target)~ï..age+sex+cp+trestbps+chol+fbs+restecg+thalach
+rf = randomForest(as.factor(target)~?..age+sex+cp+trestbps+chol+fbs+restecg+thalach
                   +exang+oldpeak+slope+ca+thal, data = train_data,ntree = 33, nodesize =7, importance = T, proximity = TRUE)
 
 pred_rf = predict(rf, val_data)
@@ -224,7 +255,7 @@ for (i in 1:k){ #sample randomly 100 times
     auc_cart[i] = auc(val_data$target,val_data$pred_cart)
   },TRUE)
   ##NEURAL NET
-  nn = nnet(target~ï..age+sex+cp+trestbps+chol+fbs+restecg+thalach
+  nn = nnet(target~?..age+sex+cp+trestbps+chol+fbs+restecg+thalach
             +exang+oldpeak+slope+ca+thal, data = train_data, size = 5, decay = 5e-4, maxit = 100)
   try({
     prob_nn = predict(nn, val_data)
@@ -267,3 +298,5 @@ print(mean(auc_cart, na.rm = TRUE))
 print(mean(auc_nn, na.rm = TRUE))
 print(mean(auc_xgboost, na.rm = TRUE))
 print(auc_rf)
+
+#just learning#
