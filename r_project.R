@@ -235,6 +235,7 @@ for (i in 1:k){ #sample randomly 100 times
   rand_rows = sample(1:nrow(data_temp), 0.7*nrow(data_temp)) #split into training and validation dataset
   train_data = data_temp[rand_rows, ]
   val_data = data_temp[-rand_rows, ]
+  pPos<-sum(train_data$target)/nrow(train_data) #Get unconditional probablity of target being 1
   
   ##LOGISTISTIC
   logit = glm(fmla, data = train_data, family = "binomial")
@@ -299,4 +300,66 @@ print(mean(auc_nn, na.rm = TRUE))
 print(mean(auc_xgboost, na.rm = TRUE))
 print(auc_rf)
 
-#just learning#
+### Alternative for-loop with ROCR package solution for logit #### 
+
+###Cross-Validation
+k = 100
+acc_log = NULL
+acc_cart = NULL
+acc_nn = NULL
+acc_xgboost = NULL
+acc_rf = confusionMatrix(table(val_data$target,val_data$pred_rf), positive = "1")$overall['Accuracy']
+er_log = NULL
+er_cart = NULL
+er_nn = NULL
+er_xgboost = NULL
+er_rf = mean(pred_rf != val_data$target)
+ac_log = NULL
+ac_cart = NULL
+ac_nn = NULL
+ac_xgboost = NULL
+ac_rf = auc(val_data$target,as.numeric(val_data$pred_rf))
+logit_pred = vector(mode = "list", length = 100)
+prob_log = vector(mode = "list", length = 100)
+
+set.seed(100)
+
+for (i in 1:k){ #sample randomly 100 times
+  n = nrow(data_cv)
+  data_temp = data_cv[sample(n),] 
+  rand_rows = sample(1:nrow(data_temp), 0.7*nrow(data_temp)) #split into training and validation dataset
+  train_data = data_temp[rand_rows, ]
+  val_data = data_temp[-rand_rows, ]
+  
+  ##LOGISTISTIC
+  logit = glm(fmla, data = train_data, family = "binomial")
+  try({
+    prob_log[[i]] = predict(logit, val_data, type = "response")
+    logit_pred[[i]] = val_data$target # save prediction and true value for later use in a list
+  }, TRUE)
+}
+
+ind.drop= unlist(lapply(prob_log, is.numeric)) # create index for dropping NULL values as they interfer with later analysis
+prob_log= prob_log[ind.drop==TRUE] # drop NULL values (created because new factor levels in test set)
+logit_pred = logit_pred[ind.drop==TRUE] # drop true values corresponding to NULL values
+
+manypred = prediction(prob_log, logit_pred)
+
+many.roc.perf = performance(manypred, measure = "tpr", x.measure = "fpr")
+plot(many.roc.perf, col=1:10)
+abline(a=0, b= 1) #plot of all the ROC curves
+
+print(opt.cut(many.roc.perf, manypred)) # find optimal cutoffs for each estimation
+
+many.acc.perf = performance(manypred, measure = "acc") # find cutoff for highest possible accuracy
+sapply(manypred@labels, function(x) mean(x == 1))
+
+mapply(function(x, y){
+  ind = which.max( y )
+  acc = y[ind]
+  cutoff = x[ind]
+  return(c(accuracy= acc, cutoff = cutoff))
+}, slot(many.acc.perf, "x.values"), slot(many.acc.perf, "y.values"))
+
+manypauc.perf = performance(manypred, measure = "auc") # area under the curve values for all estimations
+manypauc.perf@y.values
