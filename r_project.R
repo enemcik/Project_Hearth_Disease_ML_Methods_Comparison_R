@@ -14,6 +14,7 @@ install.packages("DiagrammeR")
 install.packages("openxlsx")
 install.packages("party")
 install.packages('nnet')
+install.packages("e1071")
 
 library(party)
 library(DiagrammeR)
@@ -146,6 +147,61 @@ plot(roc(val_data$target, val_data$pred_cart, direction="<"),
 
 err_cart = mean(pred_cart != val_data$target) #error
 err_cart
+### Bagging Decision trees ###
+m<-dim(train_data)[1]
+ntree<-33
+samples<-sapply(1:ntree,
+                FUN = function(iter)
+                {sample(1:m, size=m, replace=T)}) #replace=T makes it a bootstrap 
+head(samples)
+hist(samples[,1])
+
+treelist<-lapply(1:ntree, #Training the individual decision trees and return them in a list
+                 FUN=function(iter) {
+                   samp <- samples[,iter];
+                   rpart(fmla,train_data[samp,])
+                 }
+)
+treelist[[1]]
+plot(treelist[[1]])
+plot(treelist[[33]])
+
+#predict.bag assumes the underlying classifier returns decision probabilities, not decisions. 
+predict.bag<-function(treelist,newdata) {
+  preds<-sapply(1:length(treelist),
+                FUN=function(iter) {
+                  predict(treelist[[iter]],newdata=newdata)
+                }
+  )
+  predsums<-rowSums(preds)
+  predsums/length(treelist)
+}
+
+#formulas for log likelihood and accuracy measures
+loglikelihood<-function(y,py) { #Likelihood is later needed for deviance (y==truth,py==pred).
+  pysmooth<-ifelse(py==0,1e-12, #Smoothing is not completely necessary but it surely does not hurt.
+                   ifelse(py==1,1-1e-12,py))
+  sum(y*log(pysmooth)+(1-y)*log(1-pysmooth))
+}
+
+accuracyMeasures<-function(pred,truth,name="model") { #Function for various accuracy measures.
+  dev.norm <- -2*loglikelihood(as.numeric(truth),pred)/length(pred) #Normalized deviance so that we can better compare across datasets
+  ctable<-table(truth=truth,
+                pred=(pred>0.5)) #Set a threshold of 0.5
+  accuracy<-sum(diag(ctable))/sum(ctable)
+  precision<-ctable[2,2]/sum(ctable[,2])
+  recall<-ctable[2,2]/sum(ctable[2,])
+  f1<-2*precision*recall/(precision+recall)
+  data.frame(model=name, accuracy=accuracy, f1=f1, dev.norm)
+}
+
+#Evaluate the bagged decision trees against the training and test sets.
+accuracyMeasures(predict.bag(treelist, newdata=train_data),
+                 train_data$target==1,
+                 name="bagging, training")
+accuracyMeasures(predict.bag(treelist, newdata=val_data),
+                 val_data$target==1,
+                 name="bagging, test")
 
 ###NEURAL NETWORKS###
 nn = nnet(target~?..age+sex+cp+trestbps+chol+fbs+restecg+thalach
@@ -226,7 +282,9 @@ ac_cart = NULL
 ac_nn = NULL
 ac_xgboost = NULL
 ac_rf = auc(val_data$target,as.numeric(val_data$pred_rf))
-
+acc.bt.train=NULL
+acc.bt.val= NULL
+  
 set.seed(100)
 
 for (i in 1:k){ #sample randomly 100 times
@@ -279,6 +337,33 @@ for (i in 1:k){ #sample randomly 100 times
     acc_xgboost[i] = confusionMatrix(table(val_data$target,pred_xgboost), positive = "1")$overall['Accuracy']
     er_xgboost[i] = mean(pred_xgboost != val_data$target) #error
     auc_xgboost[i] = auc(val_data$target,val_data$pred_xgboost)
+  }, TRUE)
+  ## Bagged Tree
+  try({
+    samples<-sapply(1:ntree,
+                    FUN = function(iter)
+                    {sample(1:m, size=m, replace=T)})
+    treelist<-lapply(1:ntree, #Training the individual decision trees and return them in a list
+                     FUN=function(iter) {
+                       samp <- samples[,iter];
+                       rpart(fmla,train_data[samp,])
+                     }
+    )
+    predict.bag<-function(treelist,newdata) {
+      preds<-sapply(1:length(treelist),
+                    FUN=function(iter) {
+                      predict(treelist[[iter]],newdata=newdata)
+                    }
+      )
+      predsums<-rowSums(preds)
+      predsums/length(treelist)
+    }
+    acc.bt.train[[i]] =accuracyMeasures(predict.bag(treelist, newdata=train_data),
+                     train_data$target==1,
+                     name="bagging, training")
+    acc.bt.val[[i]] = accuracyMeasures(predict.bag(treelist, newdata=val_data),
+                     val_data$target==1,
+                     name="bagging, test")
   }, TRUE)
 }
 
