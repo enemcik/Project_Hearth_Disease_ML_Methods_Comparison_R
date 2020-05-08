@@ -456,15 +456,14 @@ av_logit_acc= c(mean(logit_acc[1,]), mean(logit_acc[2,])) #average highest accur
 manypauc.perf = performance(manypred, measure = "auc") # area under the curve values for all estimations
 logit_auc_mean = mean(unlist(manypauc.perf@y.values))
 
-pred_log = as.numeric(prob_log > cutoff)
-err_log = mean(pred_log != val_data$target) #error
-err_log
-#trying to find error average here but must be still worked on
-pred_log=NULL
-err_log= NULL
+#error average here but must be still worked on (maybe not best solution like this)
+pred_log = vector(mode = "list", length = 84)
+err_log= vector(mode = "list", length = 84)
 logit_acc_list =as.list(logit_acc[1,])
 
 for (j in 1:84){
   pred_log[[j]] = as.numeric(prob_log[[j]] > logit_acc_list[[j]])
   err_log[[j]] = mean(pred_log[[j]] != logit_pred[[j]])
+  j=j+1
 }
+av_error_log= mean(unlist(err_log))
