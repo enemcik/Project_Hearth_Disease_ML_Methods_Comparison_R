@@ -85,7 +85,6 @@ logit = glm(fmla, data = train_data, family = "binomial")
 summary(logit)
 
 #### alternative way using ROCR package####
-library(ROCR)
 prob_log = predict(logit, val_data, type = "response")
 pred = prediction(prob_log, val_data$target) #create a prediction object with true values and predicted ones
 
@@ -112,6 +111,11 @@ ind = which.max( slot(acc.perf, "y.values")[[1]] )
 acc = slot(acc.perf, "y.values")[[1]][ind]
 cutoff = slot(acc.perf, "x.values")[[1]][ind]
 print(c(accuracy= acc, cutoff = cutoff))
+
+#ERROR AVERAGE - minimized by maximizing ACCURACY using its cutoff
+pred_log = as.numeric(prob_log > cutoff)
+err_log = mean(pred_log != val_data$target) #error
+err_log
 
 #### END alternative way using ROCR package####
 
@@ -434,17 +438,33 @@ many.roc.perf = performance(manypred, measure = "tpr", x.measure = "fpr")
 plot(many.roc.perf, col=1:10)
 abline(a=0, b= 1) #plot of all the ROC curves
 
-print(opt.cut(many.roc.perf, manypred)) # find optimal cutoffs for each estimation
+sp_sen_logit= opt.cut(many.roc.perf, manypred) # find optimal cutoffs for each estimation according to trade off sensitivity and specitivity
+av_sp_sen_logit = c(mean(sp_sen_logit[1,]), mean(sp_sen_logit[2,]), mean(sp_sen_logit[3,]))
 
 many.acc.perf = performance(manypred, measure = "acc") # find cutoff for highest possible accuracy
 sapply(manypred@labels, function(x) mean(x == 1))
 
-mapply(function(x, y){
-  ind = which.max( y )
-  acc = y[ind]
-  cutoff = x[ind]
-  return(c(accuracy= acc, cutoff = cutoff))
-}, slot(many.acc.perf, "x.values"), slot(many.acc.perf, "y.values"))
+logit_acc = mapply(function(x, y){
+            ind = which.max( y )
+            acc = y[ind]
+            cutoff = x[ind]
+            return(c(accuracy= acc, cutoff = cutoff))
+            }, slot(many.acc.perf, "x.values"), slot(many.acc.perf, "y.values"))
+
+av_logit_acc= c(mean(logit_acc[1,]), mean(logit_acc[2,])) #average highest accuracy and corresponding average cutoff
 
 manypauc.perf = performance(manypred, measure = "auc") # area under the curve values for all estimations
-manypauc.perf@y.values
+logit_auc_mean = mean(unlist(manypauc.perf@y.values))
+
+pred_log = as.numeric(prob_log > cutoff)
+err_log = mean(pred_log != val_data$target) #error
+err_log
+#trying to find error average here but must be still worked on
+pred_log=NULL
+err_log= NULL
+logit_acc_list =as.list(logit_acc[1,])
+
+for (j in 1:84){
+  pred_log[[j]] = as.numeric(prob_log[[j]] > logit_acc_list[[j]])
+  err_log[[j]] = mean(pred_log[[j]] != logit_pred[[j]])
+}
