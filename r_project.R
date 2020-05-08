@@ -14,6 +14,7 @@ install.packages("DiagrammeR")
 install.packages("openxlsx")
 install.packages("party")
 install.packages('nnet')
+install.packages("e1071")
 
 library(party)
 library(DiagrammeR)
@@ -83,6 +84,41 @@ fmla
 logit = glm(fmla, data = train_data, family = "binomial")
 summary(logit)
 
+#### alternative way using ROCR package####
+prob_log = predict(logit, val_data, type = "response")
+pred = prediction(prob_log, val_data$target) #create a prediction object with true values and predicted ones
+
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr") #performance measure as ROC
+plot(roc.perf)
+
+auc.perf = performance(pred, measure = "auc") #performance measure AUC
+auc.perf@y.values
+
+opt.cut = function(perf, pred){
+  cut.ind = mapply(FUN=function(x, y, p){
+    d = (x - 0)^2 + (y-1)^2
+    ind = which(d == min(d))
+    c(sensitivity = y[[ind]], specificity = 1-x[[ind]], 
+      cutoff = p[[ind]])
+  }, perf@x.values, perf@y.values, pred@cutoffs)
+}
+print(opt.cut(roc.perf, pred)) #formula which finds "optimal" cutoff weighting both sensitivity and specificity equally (TPR and FPR)
+
+acc.perf = performance(pred, measure = "acc") # find best cutoff according to accuracy
+plot(acc.perf)
+
+ind = which.max( slot(acc.perf, "y.values")[[1]] )
+acc = slot(acc.perf, "y.values")[[1]][ind]
+cutoff = slot(acc.perf, "x.values")[[1]][ind]
+print(c(accuracy= acc, cutoff = cutoff))
+
+#ERROR AVERAGE - minimized by maximizing ACCURACY using its cutoff
+pred_log = as.numeric(prob_log > cutoff)
+err_log = mean(pred_log != val_data$target) #error
+err_log
+
+#### END alternative way using ROCR package####
+
 prob_log = predict(logit, val_data) #prediction
 pred_log = as.numeric(prob_log > 0.5)
 val_data$pred_log = pred_log
@@ -115,9 +151,64 @@ plot(roc(val_data$target, val_data$pred_cart, direction="<"),
 
 err_cart = mean(pred_cart != val_data$target) #error
 err_cart
+### Bagging Decision trees ###
+m<-dim(train_data)[1]
+ntree<-33
+samples<-sapply(1:ntree,
+                FUN = function(iter)
+                {sample(1:m, size=m, replace=T)}) #replace=T makes it a bootstrap 
+head(samples)
+hist(samples[,1])
+
+treelist<-lapply(1:ntree, #Training the individual decision trees and return them in a list
+                 FUN=function(iter) {
+                   samp <- samples[,iter];
+                   rpart(fmla,train_data[samp,])
+                 }
+)
+treelist[[1]]
+plot(treelist[[1]])
+plot(treelist[[33]])
+
+#predict.bag assumes the underlying classifier returns decision probabilities, not decisions. 
+predict.bag<-function(treelist,newdata) {
+  preds<-sapply(1:length(treelist),
+                FUN=function(iter) {
+                  predict(treelist[[iter]],newdata=newdata)
+                }
+  )
+  predsums<-rowSums(preds)
+  predsums/length(treelist)
+}
+
+#formulas for log likelihood and accuracy measures
+loglikelihood<-function(y,py) { #Likelihood is later needed for deviance (y==truth,py==pred).
+  pysmooth<-ifelse(py==0,1e-12, #Smoothing is not completely necessary but it surely does not hurt.
+                   ifelse(py==1,1-1e-12,py))
+  sum(y*log(pysmooth)+(1-y)*log(1-pysmooth))
+}
+
+accuracyMeasures<-function(pred,truth,name="model") { #Function for various accuracy measures.
+  dev.norm <- -2*loglikelihood(as.numeric(truth),pred)/length(pred) #Normalized deviance so that we can better compare across datasets
+  ctable<-table(truth=truth,
+                pred=(pred>0.5)) #Set a threshold of 0.5
+  accuracy<-sum(diag(ctable))/sum(ctable)
+  precision<-ctable[2,2]/sum(ctable[,2])
+  recall<-ctable[2,2]/sum(ctable[2,])
+  f1<-2*precision*recall/(precision+recall)
+  data.frame(model=name, accuracy=accuracy, f1=f1, dev.norm)
+}
+
+#Evaluate the bagged decision trees against the training and test sets.
+accuracyMeasures(predict.bag(treelist, newdata=train_data),
+                 train_data$target==1,
+                 name="bagging, training")
+accuracyMeasures(predict.bag(treelist, newdata=val_data),
+                 val_data$target==1,
+                 name="bagging, test")
 
 ###NEURAL NETWORKS###
-nn = nnet(target~ï..age+sex+cp+trestbps+chol+fbs+restecg+thalach
+nn = nnet(target~?..age+sex+cp+trestbps+chol+fbs+restecg+thalach
           +exang+oldpeak+slope+ca+thal, data = train_data, size = 5, decay = 5e-4, maxit = 100)
 summary(nn)
 
@@ -162,7 +253,7 @@ err_xgboost = mean(pred_xgboost != val_data$target) #error
 err_xgboost
 
 ###RANDOM FOREST###
-rf = randomForest(as.factor(target)~ï..age+sex+cp+trestbps+chol+fbs+restecg+thalach
+rf = randomForest(as.factor(target)~?..age+sex+cp+trestbps+chol+fbs+restecg+thalach
                   +exang+oldpeak+slope+ca+thal, data = train_data,ntree = 33, nodesize =7, importance = T, proximity = TRUE)
 
 pred_rf = predict(rf, val_data)
@@ -195,7 +286,9 @@ ac_cart = NULL
 ac_nn = NULL
 ac_xgboost = NULL
 ac_rf = auc(val_data$target,as.numeric(val_data$pred_rf))
-
+acc.bt.train=NULL
+acc.bt.val= NULL
+  
 set.seed(100)
 
 for (i in 1:k){ #sample randomly 100 times
@@ -204,6 +297,7 @@ for (i in 1:k){ #sample randomly 100 times
   rand_rows = sample(1:nrow(data_temp), 0.7*nrow(data_temp)) #split into training and validation dataset
   train_data = data_temp[rand_rows, ]
   val_data = data_temp[-rand_rows, ]
+  pPos<-sum(train_data$target)/nrow(train_data) #Get unconditional probablity of target being 1
   
   ##LOGISTISTIC
   logit = glm(fmla, data = train_data, family = "binomial")
@@ -224,7 +318,7 @@ for (i in 1:k){ #sample randomly 100 times
     auc_cart[i] = auc(val_data$target,val_data$pred_cart)
   },TRUE)
   ##NEURAL NET
-  nn = nnet(target~ï..age+sex+cp+trestbps+chol+fbs+restecg+thalach
+  nn = nnet(target~?..age+sex+cp+trestbps+chol+fbs+restecg+thalach
             +exang+oldpeak+slope+ca+thal, data = train_data, size = 5, decay = 5e-4, maxit = 100)
   try({
     prob_nn = predict(nn, val_data)
@@ -248,6 +342,33 @@ for (i in 1:k){ #sample randomly 100 times
     er_xgboost[i] = mean(pred_xgboost != val_data$target) #error
     auc_xgboost[i] = auc(val_data$target,val_data$pred_xgboost)
   }, TRUE)
+  ## Bagged Tree
+  try({
+    samples<-sapply(1:ntree,
+                    FUN = function(iter)
+                    {sample(1:m, size=m, replace=T)})
+    treelist<-lapply(1:ntree, #Training the individual decision trees and return them in a list
+                     FUN=function(iter) {
+                       samp <- samples[,iter];
+                       rpart(fmla,train_data[samp,])
+                     }
+    )
+    predict.bag<-function(treelist,newdata) {
+      preds<-sapply(1:length(treelist),
+                    FUN=function(iter) {
+                      predict(treelist[[iter]],newdata=newdata)
+                    }
+      )
+      predsums<-rowSums(preds)
+      predsums/length(treelist)
+    }
+    acc.bt.train[[i]] =accuracyMeasures(predict.bag(treelist, newdata=train_data),
+                     train_data$target==1,
+                     name="bagging, training")
+    acc.bt.val[[i]] = accuracyMeasures(predict.bag(treelist, newdata=val_data),
+                     val_data$target==1,
+                     name="bagging, test")
+  }, TRUE)
 }
 
 print(mean(acc_log, na.rm = TRUE))
@@ -267,3 +388,82 @@ print(mean(auc_cart, na.rm = TRUE))
 print(mean(auc_nn, na.rm = TRUE))
 print(mean(auc_xgboost, na.rm = TRUE))
 print(auc_rf)
+
+### Alternative for-loop with ROCR package solution for logit #### 
+
+###Cross-Validation
+k = 100
+acc_log = NULL
+acc_cart = NULL
+acc_nn = NULL
+acc_xgboost = NULL
+acc_rf = confusionMatrix(table(val_data$target,val_data$pred_rf), positive = "1")$overall['Accuracy']
+er_log = NULL
+er_cart = NULL
+er_nn = NULL
+er_xgboost = NULL
+er_rf = mean(pred_rf != val_data$target)
+ac_log = NULL
+ac_cart = NULL
+ac_nn = NULL
+ac_xgboost = NULL
+ac_rf = auc(val_data$target,as.numeric(val_data$pred_rf))
+logit_pred = vector(mode = "list", length = 100)
+prob_log = vector(mode = "list", length = 100)
+
+set.seed(100)
+
+for (i in 1:k){ #sample randomly 100 times
+  n = nrow(data_cv)
+  data_temp = data_cv[sample(n),] 
+  rand_rows = sample(1:nrow(data_temp), 0.7*nrow(data_temp)) #split into training and validation dataset
+  train_data = data_temp[rand_rows, ]
+  val_data = data_temp[-rand_rows, ]
+  
+  ##LOGISTISTIC
+  logit = glm(fmla, data = train_data, family = "binomial")
+  try({
+    prob_log[[i]] = predict(logit, val_data, type = "response")
+    logit_pred[[i]] = val_data$target # save prediction and true value for later use in a list
+  }, TRUE)
+}
+
+ind.drop= unlist(lapply(prob_log, is.numeric)) # create index for dropping NULL values as they interfer with later analysis
+prob_log= prob_log[ind.drop==TRUE] # drop NULL values (created because new factor levels in test set)
+logit_pred = logit_pred[ind.drop==TRUE] # drop true values corresponding to NULL values
+
+manypred = prediction(prob_log, logit_pred)
+
+many.roc.perf = performance(manypred, measure = "tpr", x.measure = "fpr")
+plot(many.roc.perf, col=1:10)
+abline(a=0, b= 1) #plot of all the ROC curves
+
+sp_sen_logit= opt.cut(many.roc.perf, manypred) # find optimal cutoffs for each estimation according to trade off sensitivity and specitivity
+av_sp_sen_logit = c(mean(sp_sen_logit[1,]), mean(sp_sen_logit[2,]), mean(sp_sen_logit[3,]))
+
+many.acc.perf = performance(manypred, measure = "acc") # find cutoff for highest possible accuracy
+sapply(manypred@labels, function(x) mean(x == 1))
+
+logit_acc = mapply(function(x, y){
+            ind = which.max( y )
+            acc = y[ind]
+            cutoff = x[ind]
+            return(c(accuracy= acc, cutoff = cutoff))
+            }, slot(many.acc.perf, "x.values"), slot(many.acc.perf, "y.values"))
+
+av_logit_acc= c(mean(logit_acc[1,]), mean(logit_acc[2,])) #average highest accuracy and corresponding average cutoff
+
+manypauc.perf = performance(manypred, measure = "auc") # area under the curve values for all estimations
+logit_auc_mean = mean(unlist(manypauc.perf@y.values))
+
+#error average here but must be still worked on (maybe not best solution like this)
+pred_log = vector(mode = "list", length = 84)
+err_log= vector(mode = "list", length = 84)
+logit_acc_list =as.list(logit_acc[1,])
+
+for (j in 1:84){
+  pred_log[[j]] = as.numeric(prob_log[[j]] > logit_acc_list[[j]])
+  err_log[[j]] = mean(pred_log[[j]] != logit_pred[[j]])
+  j=j+1
+}
+av_error_log= mean(unlist(err_log))
