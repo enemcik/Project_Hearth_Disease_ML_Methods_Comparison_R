@@ -15,6 +15,7 @@ install.packages("openxlsx")
 install.packages("party")
 install.packages('nnet')
 install.packages("e1071")
+install.packages("randomForest")
 
 library(party)
 library(DiagrammeR)
@@ -68,6 +69,8 @@ sapply(data, sd)
 apply(data, 2, function(x) {sum(is.na(x))}) #NAs inspection, 0 present
 data_cv = data #cross-validation
 
+set.seed(935) #for reproducibility
+
 n = nrow(data) #shuffling the data
 data = data[sample(n),] 
 
@@ -84,7 +87,6 @@ fmla
 logit = glm(fmla, data = train_data, family = "binomial")
 summary(logit)
 
-#### alternative way using ROCR package####
 prob_log = predict(logit, val_data, type = "response")
 pred = prediction(prob_log, val_data$target) #create a prediction object with true values and predicted ones
 
@@ -112,52 +114,59 @@ acc = slot(acc.perf, "y.values")[[1]][ind]
 cutoff = slot(acc.perf, "x.values")[[1]][ind]
 print(c(accuracy= acc, cutoff = cutoff))
 
-#ERROR AVERAGE - minimized by maximizing ACCURACY using its cutoff
-pred_log = as.numeric(prob_log > cutoff)
-err_log = mean(pred_log != val_data$target) #error
+pred_log = as.numeric(prob_log > cutoff) #ERROR- minimized by maximizing ACCURACY using its cutoff
+err_log = mean(pred_log != val_data$target)
 err_log
 
-#### END alternative way using ROCR package####
-
-prob_log = predict(logit, val_data) #prediction
-pred_log = as.numeric(prob_log > 0.5)
-val_data$pred_log = pred_log
-confusionMatrix(table(val_data$target,val_data$pred_log), positive = "1")
-
-auc_log = auc(val_data$target, val_data$pred_log) #auc
-auc_log
-
-plot(roc(val_data$target, val_data$pred_log, direction="<"),
-     col="red", lwd=3, main="ROC")
-
-err_log = mean(pred_log != val_data$target) #error
-err_log
-
-###DECISION TREES###
+###DECISION TREES### Have to rethink this-> cutoff level and etc
 cart = rpart(fmla, data = train_data, method = 'class')
 summary(cart)
 rpart.plot(cart)
 
 prob_cart = predict(cart, val_data) #prediction
-pred_cart = as.numeric(prob_cart[,2] > 0.5)
+
+#alternative way using ROCR package
+pred_cart = prediction(prob_cart[,2], val_data$target)
+
+roc.perf_cart = performance(pred_cart, measure = "tpr", x.measure = "fpr") #performance measure as ROC
+plot(roc.perf_cart)
+
+auc.perf_cart = performance(pred_cart, measure = "auc") #performance measure AUC
+auc.perf_cart@y.values
+
+acc.perf_cart = performance(pred_cart, measure = "acc") # find best cutoff according to accuracy
+plot(acc.perf_cart)
+
+ind_cart = which.max( slot(acc.perf_cart, "y.values")[[1]] )
+acc_cart = slot(acc.perf_cart, "y.values")[[1]][ind_cart]
+cutoff_cart = slot(acc.perf_cart, "x.values")[[1]][ind_cart]
+print(c(accuracy= acc_cart, cutoff = cutoff_cart))
+
+pred_cart = as.numeric(prob_cart > cutoff_cart) #ERROR- minimized by maximizing ACCURACY using its cutoff
+err_cart = mean(pred_cart != val_data$target)
+err_cart
+
+## end alternative way
+auc_cart = auc(val_data$target, prob_cart[,2]) #auc
+auc_cart
+
+plot(roc(val_data$target, prob_cart[,2], direction="<"),
+     col="red", lwd=3, main="ROC")
+
+pred_cart = as.numeric(prob_cart[,2]>0.5)
 val_data$pred_cart = pred_cart
 confusionMatrix(table(val_data$target,val_data$pred_cart), positive = "1")
 
-auc_cart = auc(val_data$target, val_data$pred_cart) #auc
-auc_cart
-
-plot(roc(val_data$target, val_data$pred_cart, direction="<"),
-     col="red", lwd=3, main="ROC")
-
 err_cart = mean(pred_cart != val_data$target) #error
 err_cart
+
 ### Bagging Decision trees ###
 m<-dim(train_data)[1]
 ntree<-33
 samples<-sapply(1:ntree,
                 FUN = function(iter)
                 {sample(1:m, size=m, replace=T)}) #replace=T makes it a bootstrap 
-head(samples)
+head(samples) # inspecting frequencies of samples
 hist(samples[,1])
 
 treelist<-lapply(1:ntree, #Training the individual decision trees and return them in a list
@@ -166,9 +175,8 @@ treelist<-lapply(1:ntree, #Training the individual decision trees and return the
                    rpart(fmla,train_data[samp,])
                  }
 )
-treelist[[1]]
+treelist[[1]] #Having a peak at our trees
 plot(treelist[[1]])
-plot(treelist[[33]])
 
 #predict.bag assumes the underlying classifier returns decision probabilities, not decisions. 
 predict.bag<-function(treelist,newdata) {
@@ -208,11 +216,33 @@ accuracyMeasures(predict.bag(treelist, newdata=val_data),
                  name="bagging, test")
 
 ###NEURAL NETWORKS###
-nn = nnet(target~?..age+sex+cp+trestbps+chol+fbs+restecg+thalach
+nn = nnet(target~ï..age+sex+cp+trestbps+chol+fbs+restecg+thalach
           +exang+oldpeak+slope+ca+thal, data = train_data, size = 5, decay = 5e-4, maxit = 100)
 summary(nn)
-
+##code for optimal cutoffs and etc for logit seems to work here 
 prob_nn = predict(nn, val_data)
+pred_nn = prediction(prob_nn, val_data$target) #create a prediction object with true values and predicted ones
+
+roc.perf_nn = performance(pred_nn, measure = "tpr", x.measure = "fpr") #performance measure as ROC
+plot(roc.perf_nn)
+
+auc.perf_nn = performance(pred_nn, measure = "auc") #performance measure AUC
+auc.perf_nn@y.values
+
+print(opt.cut(roc.perf_nn, pred_nn)) #formula which finds "optimal" cutoff weighting both sensitivity and specificity equally (TPR and FPR)
+
+acc.perf_nn = performance(pred_nn, measure = "acc") # find best cutoff according to accuracy
+plot(acc.perf_nn)
+
+ind_nn = which.max( slot(acc.perf_nn, "y.values")[[1]] )
+acc_nn = slot(acc.perf_nn, "y.values")[[1]][ind_nn]
+cutoff_nn = slot(acc.perf_nn, "x.values")[[1]][ind_nn]
+print(c(accuracy= acc_nn, cutoff = cutoff_nn))
+
+pred_nn = as.numeric(prob_nn > cutoff_nn) #ERROR- minimized by maximizing ACCURACY using its cutoff
+err_nn = mean(pred_nn != val_data$target)
+err_nn
+## Eriks code for accuracy etc for neural networks
 pred_nn = as.numeric(prob_nn > 0.5)
 val_data$pred_nn = pred_nn
 confusionMatrix(table(val_data$target,val_data$pred_nn), positive = "1")
@@ -239,34 +269,36 @@ importance = xgb.importance(feature_names = colnames(sparse_matrix), model = bst
 head(importance)
 
 prob_xgboost = predict(bst, sparse_matrix_val)
+
+auc_xgboost = auc(val_data$target, prob_xgboost) #auc
+auc_xgboost
+
+plot(roc(val_data$target, prob_xgboost, direction="<"),
+     col="red", lwd=3, main="ROC")
+
 pred_xgboost = as.numeric(prob_xgboost > 0.5)
 val_data$pred_xgboost = pred_xgboost
 confusionMatrix(table(val_data$target,val_data$pred_xgboost), positive = "1")
 
-auc_xgboost = auc(val_data$target, val_data$pred_xgboost) #auc
-auc_xgboost
-
-plot(roc(val_data$target, val_data$pred_xgboost, direction="<"),
-     col="red", lwd=3, main="ROC")
-
 err_xgboost = mean(pred_xgboost != val_data$target) #error
 err_xgboost
 
-###RANDOM FOREST###
-rf = randomForest(as.factor(target)~?..age+sex+cp+trestbps+chol+fbs+restecg+thalach
+###RANDOM FOREST### have to talk about the ntree and etc settings
+rf = randomForest(as.factor(target)~ï..age+sex+cp+trestbps+chol+fbs+restecg+thalach
                   +exang+oldpeak+slope+ca+thal, data = train_data,ntree = 33, nodesize =7, importance = T, proximity = TRUE)
 
-pred_rf = predict(rf, val_data)
-val_data$pred_rf = pred_rf
-confusionMatrix(table(val_data$target,val_data$pred_rf), positive = "1")
+pred_rf = predict(rf, val_data,type='prob') # returns probabilities not 0,1 values with type="prob"
 
-auc_rf = auc(val_data$target,val_data$pred_rf) #auc
+auc_rf = auc(val_data$target,pred_rf[,2]) #auc doesnt work for me here - and does it make sense since the predict returns 1 and 0
 auc_rf
 
-plot(roc(val_data$target, val_data$pred_rf, direction="<"),
+plot(roc(val_data$target, pred_rf[,2], direction="<"),
      col="red", lwd=3, main="ROC")
 
-err_rf = mean(pred_rf != val_data$target) #error
+val_data$pred_rf = as.numeric(pred_rf[,2] > 0.5)
+confusionMatrix(table(val_data$target,val_data$pred_rf), positive = "1")
+
+err_rf = mean(abs(pred_rf[,2] - val_data$target)) #error of probabilities 
 err_rf
 
 ###Cross-Validation
@@ -318,7 +350,7 @@ for (i in 1:k){ #sample randomly 100 times
     auc_cart[i] = auc(val_data$target,val_data$pred_cart)
   },TRUE)
   ##NEURAL NET
-  nn = nnet(target~?..age+sex+cp+trestbps+chol+fbs+restecg+thalach
+  nn = nnet(target~ï..age+sex+cp+trestbps+chol+fbs+restecg+thalach
             +exang+oldpeak+slope+ca+thal, data = train_data, size = 5, decay = 5e-4, maxit = 100)
   try({
     prob_nn = predict(nn, val_data)
