@@ -15,6 +15,7 @@ install.packages("openxlsx")
 install.packages("party")
 install.packages('nnet')
 install.packages("e1071")
+install.packages("randomForest")
 
 library(party)
 library(DiagrammeR)
@@ -68,6 +69,8 @@ sapply(data, sd)
 apply(data, 2, function(x) {sum(is.na(x))}) #NAs inspection, 0 present
 data_cv = data #cross-validation
 
+set.seed(935) #for reproducibility
+
 n = nrow(data) #shuffling the data
 data = data[sample(n),] 
 
@@ -84,15 +87,14 @@ fmla
 logit = glm(fmla, data = train_data, family = "binomial")
 summary(logit)
 
-#### alternative way using ROCR package####
 prob_log = predict(logit, val_data, type = "response")
-pred = prediction(prob_log, val_data$target) #create a prediction object with true values and predicted ones
+pred_log = prediction(prob_log, val_data$target) #create a prediction object with true values and predicted ones
 
-roc.perf = performance(pred, measure = "tpr", x.measure = "fpr") #performance measure as ROC
-plot(roc.perf)
+roc.perf_log = performance(pred_log, measure = "tpr", x.measure = "fpr") #performance measure as ROC
+plot(roc.perf_log)
 
-auc.perf = performance(pred, measure = "auc") #performance measure AUC
-auc.perf@y.values
+auc.perf_log = performance(pred_log, measure = "auc") #performance measure AUC
+auc.perf_log@y.values
 
 opt.cut = function(perf, pred){
   cut.ind = mapply(FUN=function(x, y, p){
@@ -102,62 +104,69 @@ opt.cut = function(perf, pred){
       cutoff = p[[ind]])
   }, perf@x.values, perf@y.values, pred@cutoffs)
 }
-print(opt.cut(roc.perf, pred)) #formula which finds "optimal" cutoff weighting both sensitivity and specificity equally (TPR and FPR)
+print(opt.cut(roc.perf_log, pred_log)) #formula which finds "optimal" cutoff weighting both sensitivity and specificity equally (TPR and FPR)
 
-acc.perf = performance(pred, measure = "acc") # find best cutoff according to accuracy
-plot(acc.perf)
+acc.perf_log = performance(pred_log, measure = "acc") # find best cutoff according to accuracy
+plot(acc.perf_log)
 
-ind = which.max( slot(acc.perf, "y.values")[[1]] )
-acc = slot(acc.perf, "y.values")[[1]][ind]
-cutoff = slot(acc.perf, "x.values")[[1]][ind]
-print(c(accuracy= acc, cutoff = cutoff))
+ind_log = which.max( slot(acc.perf_log, "y.values")[[1]] )
+acc_log = slot(acc.perf_log, "y.values")[[1]][ind_log]
+cutoff_log = slot(acc.perf_log, "x.values")[[1]][ind_log]
+print(c(accuracy= acc_log, cutoff = cutoff_log))
 
-#ERROR AVERAGE - minimized by maximizing ACCURACY using its cutoff
-pred_log = as.numeric(prob_log > cutoff)
-err_log = mean(pred_log != val_data$target) #error
+pred_log = as.numeric(prob_log > cutoff_log) #ERROR- minimized by maximizing ACCURACY using its cutoff
+err_log = mean(pred_log != val_data$target)
 err_log
 
-#### END alternative way using ROCR package####
-
-prob_log = predict(logit, val_data) #prediction
-pred_log = as.numeric(prob_log > 0.5)
-val_data$pred_log = pred_log
-confusionMatrix(table(val_data$target,val_data$pred_log), positive = "1")
-
-auc_log = auc(val_data$target, val_data$pred_log) #auc
-auc_log
-
-plot(roc(val_data$target, val_data$pred_log, direction="<"),
-     col="red", lwd=3, main="ROC")
-
-err_log = mean(pred_log != val_data$target) #error
-err_log
-
-###DECISION TREES###
+###DECISION TREES### Have to rethink this-> cutoff level and etc
 cart = rpart(fmla, data = train_data, method = 'class')
 summary(cart)
-rpart.plot(cart)
+rpart.plot(cart) # there is no rpart.plot function apparently... plot?
 
 prob_cart = predict(cart, val_data) #prediction
-pred_cart = as.numeric(prob_cart[,2] > 0.5)
+
+#alternative way using ROCR package
+pred_cart = prediction(prob_cart[,2], val_data$target)
+
+roc.perf_cart = performance(pred_cart, measure = "tpr", x.measure = "fpr") #performance measure as ROC
+plot(roc.perf_cart)
+
+auc.perf_cart = performance(pred_cart, measure = "auc") #performance measure AUC
+auc.perf_cart@y.values
+
+acc.perf_cart = performance(pred_cart, measure = "acc") # find best cutoff according to accuracy
+plot(acc.perf_cart)
+
+ind_cart = which.max( slot(acc.perf_cart, "y.values")[[1]] )
+acc_cart = slot(acc.perf_cart, "y.values")[[1]][ind_cart]
+cutoff_cart = slot(acc.perf_cart, "x.values")[[1]][ind_cart]
+print(c(accuracy= acc_cart, cutoff = cutoff_cart))
+
+pred_cart = as.numeric(prob_cart > cutoff_cart) #ERROR- minimized by maximizing ACCURACY using its cutoff
+err_cart = mean(pred_cart != val_data$target)
+err_cart
+
+## end alternative way
+auc_cart = auc(val_data$target, prob_cart[,2]) #auc
+auc_cart
+
+plot(roc(val_data$target, prob_cart[,2], direction="<"),
+     col="red", lwd=3, main="ROC")
+
+pred_cart = as.numeric(prob_cart[,2]>0.5)
 val_data$pred_cart = pred_cart
 confusionMatrix(table(val_data$target,val_data$pred_cart), positive = "1")
 
-auc_cart = auc(val_data$target, val_data$pred_cart) #auc
-auc_cart
-
-plot(roc(val_data$target, val_data$pred_cart, direction="<"),
-     col="red", lwd=3, main="ROC")
-
 err_cart = mean(pred_cart != val_data$target) #error
 err_cart
+
 ### Bagging Decision trees ###
 m<-dim(train_data)[1]
 ntree<-33
 samples<-sapply(1:ntree,
                 FUN = function(iter)
                 {sample(1:m, size=m, replace=T)}) #replace=T makes it a bootstrap 
-head(samples)
+head(samples) # inspecting frequencies of samples
 hist(samples[,1])
 
 treelist<-lapply(1:ntree, #Training the individual decision trees and return them in a list
@@ -166,9 +175,8 @@ treelist<-lapply(1:ntree, #Training the individual decision trees and return the
                    rpart(fmla,train_data[samp,])
                  }
 )
-treelist[[1]]
+treelist[[1]] #Having a peak at our trees
 plot(treelist[[1]])
-plot(treelist[[33]])
 
 #predict.bag assumes the underlying classifier returns decision probabilities, not decisions. 
 predict.bag<-function(treelist,newdata) {
@@ -181,38 +189,55 @@ predict.bag<-function(treelist,newdata) {
   predsums/length(treelist)
 }
 
-#formulas for log likelihood and accuracy measures
-loglikelihood<-function(y,py) { #Likelihood is later needed for deviance (y==truth,py==pred).
-  pysmooth<-ifelse(py==0,1e-12, #Smoothing is not completely necessary but it surely does not hurt.
-                   ifelse(py==1,1-1e-12,py))
-  sum(y*log(pysmooth)+(1-y)*log(1-pysmooth))
-}
+prob_bagtree = predict.bag(treelist, newdata=val_data)
+pred_bagtree = prediction(prob_bagtree, val_data$target)
 
-accuracyMeasures<-function(pred,truth,name="model") { #Function for various accuracy measures.
-  dev.norm <- -2*loglikelihood(as.numeric(truth),pred)/length(pred) #Normalized deviance so that we can better compare across datasets
-  ctable<-table(truth=truth,
-                pred=(pred>0.5)) #Set a threshold of 0.5
-  accuracy<-sum(diag(ctable))/sum(ctable)
-  precision<-ctable[2,2]/sum(ctable[,2])
-  recall<-ctable[2,2]/sum(ctable[2,])
-  f1<-2*precision*recall/(precision+recall)
-  data.frame(model=name, accuracy=accuracy, f1=f1, dev.norm)
-}
+roc.perf_bagtree = performance(pred_bagtree, measure = "tpr", x.measure = "fpr") #performance measure as ROC
+plot(roc.perf_bagtree)
 
-#Evaluate the bagged decision trees against the training and test sets.
-accuracyMeasures(predict.bag(treelist, newdata=train_data),
-                 train_data$target==1,
-                 name="bagging, training")
-accuracyMeasures(predict.bag(treelist, newdata=val_data),
-                 val_data$target==1,
-                 name="bagging, test")
+auc.perf_bagtree = performance(pred_bagtree, measure = "auc") #performance measure AUC
+auc.perf_bagtree@y.values
+
+acc.perf_bagtree = performance(pred_bagtree, measure = "acc") # find best cutoff according to accuracy
+plot(acc.perf_bagtree)
+
+ind_bagtree = which.max( slot(acc.perf_bagtree, "y.values")[[1]] )
+acc_bagtree = slot(acc.perf_bagtree, "y.values")[[1]][ind_bagtree]
+cutoff_bagtree = slot(acc.perf_bagtree, "x.values")[[1]][ind_bagtree]
+print(c(accuracy= acc_bagtree, cutoff = cutoff_bagtree))
+
+pred_bagtree = as.numeric(prob_bagtree > cutoff_bagtree) #ERROR- minimized by maximizing ACCURACY using its cutoff
+err_bagtree = mean(pred_bagtree != val_data$target)
+err_bagtree
 
 ###NEURAL NETWORKS###
-nn = nnet(target~?..age+sex+cp+trestbps+chol+fbs+restecg+thalach
+nn = nnet(target~ï..age+sex+cp+trestbps+chol+fbs+restecg+thalach
           +exang+oldpeak+slope+ca+thal, data = train_data, size = 5, decay = 5e-4, maxit = 100)
 summary(nn)
-
+##code for optimal cutoffs and etc for logit seems to work here 
 prob_nn = predict(nn, val_data)
+pred_nn = prediction(prob_nn, val_data$target) #create a prediction object with true values and predicted ones
+
+roc.perf_nn = performance(pred_nn, measure = "tpr", x.measure = "fpr") #performance measure as ROC
+plot(roc.perf_nn)
+
+auc.perf_nn = performance(pred_nn, measure = "auc") #performance measure AUC
+auc.perf_nn@y.values
+
+print(opt.cut(roc.perf_nn, pred_nn)) #formula which finds "optimal" cutoff weighting both sensitivity and specificity equally (TPR and FPR)
+
+acc.perf_nn = performance(pred_nn, measure = "acc") # find best cutoff according to accuracy
+plot(acc.perf_nn)
+
+ind_nn = which.max( slot(acc.perf_nn, "y.values")[[1]] )
+acc_nn = slot(acc.perf_nn, "y.values")[[1]][ind_nn]
+cutoff_nn = slot(acc.perf_nn, "x.values")[[1]][ind_nn]
+print(c(accuracy= acc_nn, cutoff = cutoff_nn))
+
+pred_nn = as.numeric(prob_nn > cutoff_nn) #ERROR- minimized by maximizing ACCURACY using its cutoff
+err_nn = mean(pred_nn != val_data$target)
+err_nn
+## Eriks code for accuracy etc for neural networks
 pred_nn = as.numeric(prob_nn > 0.5)
 val_data$pred_nn = pred_nn
 confusionMatrix(table(val_data$target,val_data$pred_nn), positive = "1")
@@ -239,34 +264,73 @@ importance = xgb.importance(feature_names = colnames(sparse_matrix), model = bst
 head(importance)
 
 prob_xgboost = predict(bst, sparse_matrix_val)
+
+pred_xgboost = prediction(prob_xgboost, val_data$target) #create a prediction object with true values and predicted ones
+
+roc.perf_xgboost = performance(pred_xgboost, measure = "tpr", x.measure = "fpr") #performance measure as ROC
+plot(roc.perf_xgboost)
+
+auc.perf_xgboost= performance(pred_xgboost, measure = "auc") #performance measure AUC
+auc.perf_xgboost@y.values
+
+print(opt.cut(roc.perf_xgboost, pred_xgboost)) #formula which finds "optimal" cutoff weighting both sensitivity and specificity equally (TPR and FPR)
+
+acc.perf_xgboost = performance(pred_xgboost, measure = "acc") # find best cutoff according to accuracy
+plot(acc.perf_xgboost)
+
+ind_xgboost = which.max( slot(acc.perf_xgboost, "y.values")[[1]] )
+acc_xgboost= slot(acc.perf_xgboost, "y.values")[[1]][ind_xgboost]
+cutoff_xgboost = slot(acc.perf_xgboost, "x.values")[[1]][ind_xgboost]
+print(c(accuracy= acc_xgboost, cutoff = cutoff_xgboost))
+
+#Eriks code 
+auc_xgboost = auc(val_data$target, prob_xgboost) #auc
+auc_xgboost
+
+plot(roc(val_data$target, prob_xgboost, direction="<"),
+     col="red", lwd=3, main="ROC")
+
 pred_xgboost = as.numeric(prob_xgboost > 0.5)
 val_data$pred_xgboost = pred_xgboost
 confusionMatrix(table(val_data$target,val_data$pred_xgboost), positive = "1")
 
-auc_xgboost = auc(val_data$target, val_data$pred_xgboost) #auc
-auc_xgboost
-
-plot(roc(val_data$target, val_data$pred_xgboost, direction="<"),
-     col="red", lwd=3, main="ROC")
-
 err_xgboost = mean(pred_xgboost != val_data$target) #error
 err_xgboost
 
-###RANDOM FOREST###
-rf = randomForest(as.factor(target)~?..age+sex+cp+trestbps+chol+fbs+restecg+thalach
+###RANDOM FOREST### have to talk about the ntree and etc settings
+rf = randomForest(as.factor(target)~ï..age+sex+cp+trestbps+chol+fbs+restecg+thalach
                   +exang+oldpeak+slope+ca+thal, data = train_data,ntree = 33, nodesize =7, importance = T, proximity = TRUE)
 
-pred_rf = predict(rf, val_data)
-val_data$pred_rf = pred_rf
-confusionMatrix(table(val_data$target,val_data$pred_rf), positive = "1")
+prob_rf = predict(rf, val_data,type='prob') # returns probabilities not 0,1 values with type="prob"
 
-auc_rf = auc(val_data$target,val_data$pred_rf) #auc
+pred_rf = prediction(prob_rf[,2], val_data$target) #create a prediction object with true values and predicted ones
+
+roc.perf_rf = performance(pred_rf, measure = "tpr", x.measure = "fpr") #performance measure as ROC
+plot(roc.perf_rf)
+
+auc.perf_rf= performance(pred_rf, measure = "auc") #performance measure AUC
+auc.perf_rf@y.values
+
+print(opt.cut(roc.perf_rf, pred_rf)) #formula which finds "optimal" cutoff weighting both sensitivity and specificity equally (TPR and FPR)
+
+acc.perf_rf = performance(pred_rf, measure = "acc") # find best cutoff according to accuracy
+plot(acc.perf_rf)
+
+ind_rf = which.max( slot(acc.perf_rf, "y.values")[[1]] )
+acc_rf= slot(acc.perf_rf, "y.values")[[1]][ind_rf]
+cutoff_rf = slot(acc.perf_rf, "x.values")[[1]][ind_rf]
+print(c(accuracy= acc_rf, cutoff = cutoff_rf))
+#Eriks code
+auc_rf = auc(val_data$target,prob_rf[,2])
 auc_rf
 
-plot(roc(val_data$target, val_data$pred_rf, direction="<"),
+plot(roc(val_data$target, prob_rf[,2], direction="<"),
      col="red", lwd=3, main="ROC")
 
-err_rf = mean(pred_rf != val_data$target) #error
+val_data$prob_rf = as.numeric(prob_rf[,2] > 0.5)
+confusionMatrix(table(val_data$target,val_data$prob_rf), positive = "1")
+
+err_rf = mean(abs(prob_rf[,2] - val_data$target)) #error of probabilities 
 err_rf
 
 ###Cross-Validation
@@ -318,7 +382,7 @@ for (i in 1:k){ #sample randomly 100 times
     auc_cart[i] = auc(val_data$target,val_data$pred_cart)
   },TRUE)
   ##NEURAL NET
-  nn = nnet(target~?..age+sex+cp+trestbps+chol+fbs+restecg+thalach
+  nn = nnet(target~ï..age+sex+cp+trestbps+chol+fbs+restecg+thalach
             +exang+oldpeak+slope+ca+thal, data = train_data, size = 5, decay = 5e-4, maxit = 100)
   try({
     prob_nn = predict(nn, val_data)
