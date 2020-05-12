@@ -142,38 +142,6 @@ for (i in 1:k){ #sample randomly 100 times
     pred_nn = as.numeric(prob_nn > cutoff_nn) #ERROR- minimized by maximizing ACCURACY using its cutoff
     er_nn[i] = mean(pred_nn != val_data$target)
   },TRUE)
-
-  ##BOOSTED TREE
-  sparse_matrix = sparse.model.matrix(target ~ ., data = train_data)[,-1] #dummy contrast coding of categorical variables to fit the xgboost
-  sparse_matrix_val = sparse.model.matrix(target ~ ., data = val_data[,colnames(train_data)])[,-1]
-  
-  labels = train_data$target
-  
-  bst = xgboost(data = sparse_matrix, label = labels, max_depth = 4,
-                eta = 1, nthread = 2, nrounds = 10,objective = "binary:logistic")
-
-  importance = xgb.importance(feature_names = colnames(sparse_matrix), model = bst) #importance of features
-  head(importance)
-  try({
-    prob_xgboost = predict(bst, sparse_matrix_val)
-    
-    pred_xgboost = ROCR::prediction(prob_xgboost, val_data$target) #create a prediction object with true values and predicted ones
-    
-    roc.perf_xgboost = ROCR::performance(pred_xgboost, measure = "tpr", x.measure = "fpr") #performance measure as ROC
-    
-    auc.perf_xgboost= ROCR::performance(pred_xgboost, measure = "auc") #performance measure AUC
-    auc_xgboost[i] = auc.perf_xgboost@y.values[[1]]
-    
-    acc.perf_xgboost = ROCR::performance(pred_xgboost, measure = "acc") # find best cutoff according to accuracy
-    
-    ind_xgboost = which.max( slot(acc.perf_xgboost, "y.values")[[1]] )
-    acc_xgboost[i] = slot(acc.perf_xgboost, "y.values")[[1]][ind_xgboost]
-    cutoff_xgboost = slot(acc.perf_xgboost, "x.values")[[1]][ind_xgboost]
-    cut_xgboost[i] = cutoff_xgboost
-    
-    pred_xgboost = as.numeric(prob_xgboost > cutoff_xgboost) #ERROR- minimized by maximizing ACCURACY using its cutoff
-    er_xgboost[i] = mean(pred_xgboost != val_data$target)
-  },TRUE)
 }
 
 ##DECISION TREE - BAGGED ##DONE
@@ -249,29 +217,88 @@ print(c(accuracy= acc_rf, cutoff = cutoff_rf))
 pred_rf = as.numeric(prob_rf > cutoff_rf) #ERROR- minimized by maximizing ACCURACY using its cutoff
 er_rf = mean(pred_rf != val_data$target)
 
+###XGBOOST### ##DONE
+sparse_matrix = sparse.model.matrix(target ~ ., data = train_data)[,-1] #dummy contrast coding of categorical variables to fit the xgboost
+sparse_matrix_val = sparse.model.matrix(target ~ ., data = val_data[,colnames(train_data)])[,-1]
+
+labels = as.numeric(train_data$target)
+ts_label = as.numeric(val_data$target)
+
+dtrain = xgb.DMatrix(data=sparse_matrix, label = labels)
+dval = xgb.DMatrix(data = sparse_matrix_val, label = ts_label)
+
+params = list(booster = "gbtree", objective = "binary:logistic",
+              eta = 0.3, gamma = 0, max_depth = 6, min_child_weight = 1,
+              subsample = 1, colsample_bytree = 1)
+
+xgbcv = xgb.cv(params = params, data = dtrain, nrounds = 100, nfold = 5, #11 lowest
+               showsd = 5, stratified = T, print_every_n = 1,
+               early_stoppping_rounds = 20, maximize = F)
+
+min(xgbcv$evaluation_log$test_error_mean)
+
+fact_col = colnames(train_data)[sapply(train_data,is.character)]
+for(i in fact_col) set (train_data, j = i, value = factor(data_train[i]))
+for(i in fact_col) set (val_data, j = i, value = factor(data_train[i]))
+
+traintask = makeClassifTask(data = train_data, target = "target")
+testtask = makeClassifTask(data = val_data, target = "target")
+
+traintask = createDummyFeatures(obj = traintask)
+testtask = createDummyFeatures(obj = testtask)
+
+lrn = makeLearner("classif.xgboost",predict.type = "prob")
+lrn$par.vals = list(objective = "binary:logistic", eval_metric = "error")
+
+params = makeParamSet(makeDiscreteParam("booster", 
+                                        values = c("gbtree","gblinear")),
+                      makeIntegerParam("max_depth", lower = 3L, upper = 10L),
+                      makeIntegerParam("nrounds", lower = 5L, upper = 30L),
+                      makeNumericParam("min_child_weight", lower = 1L, upper = 10L),
+                      makeNumericParam("subsample", lower = 0.5, upper = 1),
+                      makeNumericParam("colsample_bytree", lower = 0.5, upper = 1),
+                      makeNumericParam("gamma",lower = 0, upper = 2),
+                      makeNumericParam("eta", lower = 0.1, upper = 3))
+rdesc = makeResampleDesc("CV", stratify = T, iters = 5L)
+ctrl = makeTuneControlRandom(maxit = 200L)
+
+parallelStartSocket(cpus=detectCores())
+mytune = tuneParams(learner = lrn, task = traintask, resampling = rdesc,
+                    measures = acc, par.set = params, control = ctrl,
+                    show.info = F)
+
+lrn_tune = setHyperPars(lrn, par.vals = mytune$x)
+xgmodel = train(learner = lrn_tune, task = traintask)
+xgpred = predict(xgmodel,testtask)
+acc_xgboost = confusionMatrix(xgpred$data$response,xgpred$data$truth)$overall[1]
+er_xgboost = mean(xgpred$data$response != xgpred$data$truth)
+
+auc = generateThreshVsPerfData(xgpred, measures = list(fpr, tpr, mmce))
+plotROCCurves(auc)
+auc_xgboost = mlr::performance(xgpred, mlr::auc)
 
 print(mean(acc_log, na.rm = TRUE))
 print(acc_cart)
 print(mean(acc_nn, na.rm = TRUE))
-print(mean(acc_xgboost, na.rm = TRUE))
+print(acc_xgboost)
 print(acc_rf)
 
 print(mean(er_log, na.rm = TRUE))
 print(er_cart)
 print(mean(er_nn, na.rm = TRUE))
-print(mean(er_xgboost, na.rm = TRUE))
+print(er_xgboost)
 print(er_rf)
 
 print(mean(auc_log, na.rm = TRUE))
 print(auc_cart)
 print(mean(auc_nn, na.rm = TRUE))
-print(mean(auc_xgboost, na.rm = TRUE))
+print(auc_xgboost)
 print(auc_rf)
 
 print(mean(cut_log, na.rm = TRUE))
 print(cut_cart)
 print(mean(cut_nn, na.rm = TRUE))
-print(mean(cut_xgboost, na.rm = TRUE))
+#print(mean(cut_xgboost, na.rm = TRUE))
 print(cut_rf)
 
 #######################
@@ -368,54 +395,3 @@ print(c(accuracy= acc_nn, cutoff = cutoff_nn))
 pred_nn = as.numeric(prob_nn > cutoff_nn) #ERROR- minimized by maximizing ACCURACY using its cutoff
 err_nn = mean(pred_nn != val_data$target)
 err_nn
-
-################
-###########TRIES
-sparse_matrix = sparse.model.matrix(target ~ ., data = train_data)[,-1] #dummy contrast coding of categorical variables to fit the xgboost
-sparse_matrix_val = sparse.model.matrix(target ~ ., data = val_data[,colnames(train_data)])[,-1]
-
-labels = as.numeric(train_data$target)
-ts_label = as.numeric(val_data$target)
-
-dtrain = xgb.DMatrix(data=sparse_matrix, label = labels)
-dval = xgb.DMatrix(data = sparse_matrix_val, label = ts_label)
-
-params = list(booster = "gbtree", objective = "binary:logistic",
-              eta = 0.3, gamma = 0, max_depth = 6, min_child_weight = 1,
-              subsample = 1, colsample_bytree = 1)
-
-xgbcv = xgb.cv(params = params, data = dtrain, nrounds = 100, nfold = 5, #11 lowest
-         showsd = 5, stratified = T, print_every_n = 1,
-         early_stoppping_rounds = 20, maximize = F)
-
-min(xgbcv$evaluation_log$test_error_mean)
-
-fact_col = colnames(train_data)[sapply(train_data,is.character)]
-for(i in fact_col) set (train_data, j = i, value = factor(data_train[i]))
-for(i in fact_col) set (val_data, j = i, value = factor(data_train[i]))
-
-traintask = makeClassifTask(data = train_data, target = "target")
-testtask = makeClassifTask(data = val_data, target = "target")
-
-traintask = createDummyFeatures(obj = traintask)
-testtask = createDummyFeatures(obj = testtask)
-
-lrn = makeLearner("classif.xgboost",predict.type = "response")
-lrn$par.vals = list(objective = "binary:logistic", eval_metric = "error",
-                    nrounds = 11L, eta = 0.1)
-
-params = makeParamSet(makeDiscreteParam("booster", 
-                                        values = c("gbtree,gblinear")),
-                      makeIntegerParam("max_depth", lower = 3L, upper = 10L),
-                      makeNumericParam("min_child_weight", lower = 1L, upper = 10L),
-                      makeNumericParam("subsample", lower = 0.5, upper = 1),
-                      makeNumericParam("colsample_bytree", lower = 0.5, upper = 1),
-                      makeNumericParam("gamma",lower = 0, upper = 2))
-rdesc = makeResampleDesc("CV", stratify = T, iters = 5L)
-ctrl = makeTuneControlRandom(maxit = 10L)
-
-parallelStartSocket(cpus=detectCores())
-mytune = tuneParams(learner = lrn, task = traintask, resampling = rdesc,
-                    measures = acc, par.set = params, control = ctrl,
-                    show.info = T)
-mytune$y
