@@ -1,31 +1,14 @@
-install.packages("openxlsx", dependencies = TRUE)
-install.packages("tidyr")
-install.packages("tidyverse")
-install.packages("cluster")
-install.packages("factoextra")
-install.packages("factoextra")
-install.packages("xgboost")
-install.packages("mltools")
-install.packages("DMwR")
-install.packages("neuralnet")
-install.packages("GGally")
-install.packages("caret")
-install.packages("DiagrammeR")
-install.packages("openxlsx")
-install.packages("party")
-install.packages('nnet')
-install.packages("e1071")
-install.packages("randomForest")
-
-library(party)
-library(DiagrammeR)
+install.packages(c("parallel","parallelMap"))
+library(parallel)
+library(parallelMap)
+#library(party)
+#library(DiagrammeR)
 library(GGally)
 library(neuralnet)
-library(foreign)
+#library(foreign)
 library(plyr)
 library(MASS)
 library(rms)
-library(ROCR)
 library(pROC)
 library(rpart)
 library(rattle)
@@ -47,6 +30,8 @@ library(zoo)
 library(caret)
 library(randomForest)
 library(nnet)
+library(ROCR)
+library(mlr)
 
 ####DATA HANDLING/INSPECTION
 data = read.csv("heart.csv")
@@ -96,12 +81,10 @@ er_log = NULL
 er_cart = NULL
 er_nn = NULL
 er_xgboost = NULL
-ac_log = NULL
-ac_cart = NULL
-ac_nn = NULL
-ac_xgboost = NULL
-acc.bt.train=NULL
-acc.bt.val= NULL
+auc_log = NULL
+auc_cart = NULL
+auc_nn = NULL
+auc_xgboost = NULL
 cut_log = NULL
 cut_cart = NULL
 cut_nn = NULL
@@ -121,7 +104,7 @@ for (i in 1:k){ #sample randomly 100 times
   logit = glm(fmla, data = train_data, family = "binomial")
   try({
     prob_log = predict(logit, val_data, type = "response")
-    pred_log = prediction(prob_log, val_data$target) #create a prediction object with true values and predicted ones
+    pred_log = ROCR::prediction(prob_log, val_data$target) #create a prediction object with true values and predicted ones
     
     roc.perf_log = performance(pred_log, measure = "tpr", x.measure = "fpr") #performance measure as ROC
     
@@ -165,7 +148,7 @@ for (i in 1:k){ #sample randomly 100 times
     }
     
     prob_bagtree = predict.bag(treelist, newdata=val_data)
-    pred_bagtree = prediction(prob_bagtree, val_data$target)
+    pred_bagtree = ROCR::prediction(prob_bagtree, val_data$target)
     
     roc.perf_bagtree = performance(pred_bagtree, measure = "tpr", x.measure = "fpr") #performance measure as ROC
     
@@ -188,7 +171,7 @@ for (i in 1:k){ #sample randomly 100 times
             +exang+oldpeak+slope+ca+thal, data = train_data, size = 5, decay = 5e-4, maxit = 100)
   try({
     prob_nn = predict(nn, val_data)
-    pred_nn = prediction(prob_nn, val_data$target) #create a prediction object with true values and predicted ones
+    pred_nn = ROCR::prediction(prob_nn, val_data$target) #create a prediction object with true values and predicted ones
     
     roc.perf_nn = performance(pred_nn, measure = "tpr", x.measure = "fpr") #performance measure as ROC
     
@@ -220,7 +203,7 @@ for (i in 1:k){ #sample randomly 100 times
   try({
     prob_xgboost = predict(bst, sparse_matrix_val)
     
-    pred_xgboost = prediction(prob_xgboost, val_data$target) #create a prediction object with true values and predicted ones
+    pred_xgboost = ROCR::prediction(prob_xgboost, val_data$target) #create a prediction object with true values and predicted ones
     
     roc.perf_xgboost = performance(pred_xgboost, measure = "tpr", x.measure = "fpr") #performance measure as ROC
     
@@ -245,7 +228,7 @@ rf = randomForest(as.factor(target)~ï..age+sex+cp+trestbps+chol+fbs+restecg+thal
 
 prob_rf = predict(rf, val_data,type='prob') # returns probabilities not 0,1 values with type="prob"
 
-pred_rf = prediction(prob_rf[,2], val_data$target) #create a prediction object with true values and predicted ones
+pred_rf = ROCR::prediction(prob_rf[,2], val_data$target) #create a prediction object with true values and predicted ones
 
 roc.perf_rf = performance(pred_rf, measure = "tpr", x.measure = "fpr") #performance measure as ROC
 plot(roc.perf_rf)
@@ -864,3 +847,54 @@ for (j in 1:84){
   j=j+1
 }
 av_error_log= mean(unlist(err_log))
+
+################
+###########TRIES
+sparse_matrix = sparse.model.matrix(target ~ ., data = train_data)[,-1] #dummy contrast coding of categorical variables to fit the xgboost
+sparse_matrix_val = sparse.model.matrix(target ~ ., data = val_data[,colnames(train_data)])[,-1]
+
+labels = as.numeric(train_data$target)
+ts_label = as.numeric(val_data$target)
+
+dtrain = xgb.DMatrix(data=sparse_matrix, label = labels)
+dval = xgb.DMatrix(data = sparse_matrix_val, label = ts_label)
+
+params = list(booster = "gbtree", objective = "binary:logistic",
+              eta = 0.3, gamma = 0, max_depth = 6, min_child_weight = 1,
+              subsample = 1, colsample_bytree = 1)
+
+xgbcv = xgb.cv(params = params, data = dtrain, nrounds = 100, nfold = 5, #11 lowest
+         showsd = 5, stratified = T, print_every_n = 1,
+         early_stoppping_rounds = 20, maximize = F)
+
+min(xgbcv$evaluation_log$test_error_mean)
+
+fact_col = colnames(train_data)[sapply(train_data,is.character)]
+for(i in fact_col) set (train_data, j = i, value = factor(data_train[i]))
+for(i in fact_col) set (val_data, j = i, value = factor(data_train[i]))
+
+traintask = makeClassifTask(data = train_data, target = "target")
+testtask = makeClassifTask(data = val_data, target = "target")
+
+traintask = createDummyFeatures(obj = traintask)
+testtask = createDummyFeatures(obj = testtask)
+
+lrn = makeLearner("classif.xgboost",predict.type = "response")
+lrn$par.vals = list(objective = "binary:logistic", eval_metric = "error",
+                    nrounds = 11L, eta = 0.1)
+
+params = makeParamSet(makeDiscreteParam("booster", 
+                                        values = c("gbtree,gblinear")),
+                      makeIntegerParam("max_depth", lower = 3L, upper = 10L),
+                      makeNumericParam("min_child_weight", lower = 1L, upper = 10L),
+                      makeNumericParam("subsample", lower = 0.5, upper = 1),
+                      makeNumericParam("colsample_bytree", lower = 0.5, upper = 1),
+                      makeNumericParam("gamma",lower = 0, upper = 2))
+rdesc = makeResampleDesc("CV", stratify = T, iters = 5L)
+ctrl = makeTuneControlRandom(maxit = 10L)
+
+parallelStartSocket(cpus=detectCores())
+mytune = tuneParams(learner = lrn, task = traintask, resampling = rdesc,
+                    measures = acc, par.set = params, control = ctrl,
+                    show.info = T)
+mytune$y
