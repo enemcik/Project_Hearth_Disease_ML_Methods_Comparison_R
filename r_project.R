@@ -45,12 +45,12 @@ data$exang = as.factor(data$exang) # induced angina
 data$slope = as.factor(data$slope) #slope
 data$ca = as.factor(data$ca) #number of colored vessels
 data$thal = as.factor(data$thal) #thal
+data$target = as.factor(data$target) #outcome variable (heart disease or not)
 
 data = data[data$thal!=0,]  #removing and merging very rare levels /not informative
 data$thal = factor(data$thal)
-data$ca[data$ca==4] = 3
+#data$ca[data$ca==4] = 3
 data$ca = factor(data$ca)
-
 
 str(data) #variables
 summary(data) #variable statistics
@@ -165,7 +165,7 @@ try({
 
 ###RANDOM FOREST ##DONE
 set.seed(87)
-rf = randomForest(as.factor(target)~ï..age+sex+cp+trestbps+chol+fbs+restecg+thalach
+rf = randomForest(as.factor(target)~Ã¯..age+sex+cp+trestbps+chol+fbs+restecg+thalach
                   +exang+oldpeak+slope+ca+thal, nodesize = 1 ,data = train_data, proximity = TRUE)
 
 prob_rf = predict(rf, val_data,type='prob') # returns probabilities not 0,1 values with type="prob"
@@ -348,9 +348,9 @@ er_cart_old
 
 ###NEURAL NETWORKS### ##DONE
 set.seed(69)
-nn = nnet(target~ï..age+sex+cp+trestbps+chol+fbs+restecg+thalach
+nn = nnet(target~Ã¯..age+sex+cp+trestbps+chol+fbs+restecg+thalach
           +exang+oldpeak+slope+ca+thal, data = train_data, size = 5, decay = 5e-4, maxit = 100)
-##code for optimal cutoffs and etc for logit seems to work here 
+
 prob_nn = predict(nn, val_data)
 pred_nn = ROCR::prediction(prob_nn, val_data$target) #create a prediction object with true values and predicted ones
 
