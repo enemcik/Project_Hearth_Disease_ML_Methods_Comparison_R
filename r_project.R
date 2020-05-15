@@ -83,8 +83,20 @@ fmla
 k = 100
 prob_log_train =  NULL
 prob_log_test = NULL
-perf_log_train= as.data.frame( matrix(0, ncol = 0, nrow = 8))
-perf_log_test=as.data.frame( matrix(0, ncol = 0, nrow = 8))
+perf_log_train= as.data.frame( matrix(0, ncol = 0, nrow = 0))
+perf_log_test=as.data.frame( matrix(0, ncol = 0, nrow = 0))
+prob_cart_train= NULL
+prob_cart_test= NULL
+perf_cart_train= as.data.frame( matrix(0, ncol = 0, nrow = 0))
+perf_cart_test=as.data.frame( matrix(0, ncol = 0, nrow = 0))
+prob_nn_train= NULL
+prob_nn_test= NULL
+perf_nn_train= as.data.frame( matrix(0, ncol = 0, nrow = 0))
+perf_nn_test=as.data.frame( matrix(0, ncol = 0, nrow = 0))
+prob_rftrain= NULL
+prob_rftest= NULL
+perf_rf_train= as.data.frame( matrix(0, ncol = 0, nrow = 0))
+perf_rf_test=as.data.frame( matrix(0, ncol = 0, nrow = 0))
 
 for (i in 1:k){ #sample randomly 100 times
   n = nrow(data_cv)
@@ -101,11 +113,45 @@ for (i in 1:k){ #sample randomly 100 times
     perf_log_train = rbind(perf_log_train, performanceMeasures(prob_log_train, train_data$target, name="Logit Training"))
     perf_log_test = rbind(perf_log_test,performanceMeasures(prob_log_test, val_data$target, name="Logit Testing"))
   },TRUE)
+  cart = rpart(fmla, data = train_data, method = 'class')
+  try({
+    prob_cart_train = predict(cart, train_data)
+    prob_cart_test = predict(cart, val_data) #prediction
+    perf_cart_train = rbind(perf_cart_train,performanceMeasures(prob_cart_train[,2], train_data$target, name="DECISION TREES Training"))
+    perf_cart_test =rbind(perf_cart_test, performanceMeasures(prob_cart_test[,2], val_data$target, name="DECISION TREES Testing"))
+    },TRUE)
+  nn = nnet(target~ï..age+sex+cp+trestbps+chol+fbs+restecg+thalach
+            +exang+oldpeak+slope+ca+thal, data = train_data, size = 5, decay = 5e-4, maxit = 100)
+  try({
+    prob_nn_train = predict(nn, train_data)
+    prob_nn_test = predict(nn, val_data) #prediction
+    perf_nn_train =rbind(perf_nn_train, performanceMeasures(prob_nn_train, train_data$target, name="NEURAL NETWORKS Training"))
+    perf_nn_test = rbind(perf_nn_test, performanceMeasures(prob_nn_test, val_data$target, name="NEURAL NETWORKS Testing"))
+    },TRUE)
+  rf = randomForest(as.factor(target)~ï..age+sex+cp+trestbps+chol+fbs+restecg+thalach
+                    +exang+oldpeak+slope+ca+thal, nodesize = 1 ,data = train_data, proximity = TRUE)
+  try({
+    prob_rf_train = predict(rf, train_data, type='prob') # returns probabilities not 0,1 values with type="prob"
+    prob_rf_test = predict(rf, val_data, type='prob')
+    perf_rf_train = rbind(perf_rf_train,performanceMeasures(prob_rf_train[,2], train_data$target, name="RANDOM FOREST Training"))
+    perf_rf_test = rbind(perf_rf_test,performanceMeasures(prob_rf_test[,2], val_data$target, name="RANDOM FOREST Testing"))
+    })
+ 
 }
-colMeans(perf_log_train[sapply(perf_log_train, is.numeric)]) 
-colMeans(perf_log_test[sapply(perf_log_test, is.numeric)])
 
-##DECISION TREE - BAGGED ##DONE ### Doesnt work with rare levels (at least the performance measures)
+summary(perf_log_train)
+summary(perf_log_test)
+
+summary(perf_cart_train)
+summary(perf_cart_test)
+
+summary(perf_nn_train)
+summary(perf_nn_test)
+
+summary(perf_rf_train)
+summary(perf_rf_test)
+
+##DECISION TREE - BAGGED ##DONE ### Doesnt work (at least the performance measures)
 m<-dim(train_data)[1]
 ntree<-500
 set.seed(65)
@@ -268,12 +314,10 @@ opt.cut = function(perf, pred){ # function which finds optimal cutoff level maxi
 performanceMeasures<-function(prob, truth, name="model") { #Function for various accuracy measures we use.
   pred= ROCR::prediction(prob, truth)
   roc = ROCR::performance(pred, measure = "tpr", x.measure = "fpr") #performance measure as ROC
-  plot(roc) 
   auc.perf= ROCR::performance(pred, measure = "auc") #performance measure AUC
   auc= auc.perf@y.values[[1]]
   sen_spe = opt.cut(roc, pred)
   acc.perf = ROCR::performance(pred, measure = "acc") # find best cutoff according to accuracy
-  plot(acc.perf)
   ind = which.max( slot(acc.perf, "y.values")[[1]] )
   acc = slot(acc.perf, "y.values")[[1]][ind]
   cutoff= slot(acc.perf, "x.values")[[1]][ind]
