@@ -49,7 +49,7 @@ data$target = as.factor(data$target) #outcome variable (heart disease or not)
 
 data = data[data$thal!=0,]  #removing and merging very rare levels /not informative
 data$thal = factor(data$thal)
-#data$ca[data$ca==4] = 3
+data$ca[data$ca==4] = 3
 data$ca = factor(data$ca)
 
 str(data) #variables
@@ -66,7 +66,7 @@ n = nrow(data) #shuffling the data
 set.seed(104)
 data = data[sample(n),] 
 
-set.seed(46)
+set.seed(45)
 rand_rows = sample(1:nrow(data), 0.6*nrow(data)) #split into training and validation dataset
 train_data = data[rand_rows, ]
 val_data = data[-rand_rows, ]
