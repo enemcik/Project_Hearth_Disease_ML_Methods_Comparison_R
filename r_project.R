@@ -128,7 +128,7 @@ perf_cart_test
 
 ###NEURAL NETWORKS### ##DONE
 set.seed(69)
-nn = nnet(target~Ã¯..age+sex+cp+trestbps+chol+fbs+restecg+thalach
+nn = nnet(target~ï..age+sex+cp+trestbps+chol+fbs+restecg+thalach
           +exang+oldpeak+slope+ca+thal, data = train_data, size = 5, decay = 5e-4, maxit = 100)
 
 prob_nn_train = predict(nn, train_data)
@@ -181,7 +181,7 @@ perf_bagtree_test
 
 ###RANDOM FOREST ##DONE
 set.seed(87)
-rf = randomForest(as.factor(target)~Ã¯..age+sex+cp+trestbps+chol+fbs+restecg+thalach
+rf = randomForest(as.factor(target)~ï..age+sex+cp+trestbps+chol+fbs+restecg+thalach
                   +exang+oldpeak+slope+ca+thal, nodesize = 1 ,data = train_data, proximity = TRUE)
 
 prob_rf_train = predict(rf, train_data, type='prob') # returns probabilities not 0,1 values with type="prob"
@@ -240,7 +240,7 @@ for (i in 1:k){ #sample randomly 100 times
     perf_cart_train = rbind(perf_cart_train,performanceMeasures(prob_cart_train[,2], train_data$target, name="DECISION TREES Training"))
     perf_cart_test =rbind(perf_cart_test, performanceMeasures(prob_cart_test[,2], val_data$target, name="DECISION TREES Testing"))
     },TRUE)
-  nn = nnet(target~Ã¯..age+sex+cp+trestbps+chol+fbs+restecg+thalach
+  nn = nnet(target~ï..age+sex+cp+trestbps+chol+fbs+restecg+thalach
             +exang+oldpeak+slope+ca+thal, data = train_data, size = 5, decay = 5e-4, maxit = 100)
   try({
     prob_nn_train = predict(nn, train_data)
@@ -248,7 +248,7 @@ for (i in 1:k){ #sample randomly 100 times
     perf_nn_train =rbind(perf_nn_train, performanceMeasures(prob_nn_train, train_data$target, name="NEURAL NETWORKS Training"))
     perf_nn_test = rbind(perf_nn_test, performanceMeasures(prob_nn_test, val_data$target, name="NEURAL NETWORKS Testing"))
     },TRUE)
-  rf = randomForest(as.factor(target)~Ã¯..age+sex+cp+trestbps+chol+fbs+restecg+thalach
+  rf = randomForest(as.factor(target)~ï..age+sex+cp+trestbps+chol+fbs+restecg+thalach
                     +exang+oldpeak+slope+ca+thal, nodesize = 1 ,data = train_data, proximity = TRUE)
   try({
     prob_rf_train = predict(rf, train_data, type='prob') # returns probabilities not 0,1 values with type="prob"
@@ -344,9 +344,10 @@ xgpred = predict(xgmodel,testtask)
 acc_xgboost = confusionMatrix(xgpred$data$response,xgpred$data$truth)$overall[1]
 er_xgboost = mean(xgpred$data$response != xgpred$data$truth)
 
+performanceMeasures(xgpred$data$prob.1,xgpred$data$truth)
+
 auc = generateThreshVsPerfData(xgpred, measures = list(fpr, tpr, mmce))
 plotROCCurves(auc)
-auc_xgboost = mlr::performance(xgpred, mlr::auc)
 
 
 ##NNET
