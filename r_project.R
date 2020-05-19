@@ -113,7 +113,7 @@ prob_log_test = predict(logit, val_data, type = "response")
 perf_log_train = performanceMeasures(prob_log_train, train_data$target, name="Logit Training")
 perf_log_train
 perf_log_test = performanceMeasures(prob_log_test, val_data$target, name="Logit Testing")
-
+perf_log_test
 ###DECISION TREES### ##DONE
 cart = rpart(fmla, data = train_data, method = 'class')
 rpart.plot(cart)
