@@ -1,4 +1,4 @@
-install.packages(c("parallel","parallelMap"))
+install.packages(c("parallel","parallelMap", "mlr"))
 library(parallel)
 library(parallelMap)
 #library(party)
@@ -37,6 +37,11 @@ data = read.csv("heart.csv")
 data = as.data.frame(data)
 head(data,5)
 
+data = data[data$thal!=0,]  #removing and merging very rare levels /not informative
+data$ca[data$ca==4] = 3
+data$restecg[data$restecg==2] = 1 
+names(data)[names(data)=="ï..age"]="age" # had a weird name "i with double points" which when the file is downloaded is changed to "?..age"
+
 data$sex = as.factor(data$sex) #gender
 data$cp = as.factor(data$cp) #chest pain
 data$fbs = as.factor(data$fbs) #fasting blood sugar
@@ -47,10 +52,6 @@ data$ca = as.factor(data$ca) #number of colored vessels
 data$thal = as.factor(data$thal) #thal
 data$target = as.factor(data$target) #outcome variable (heart disease or not)
 
-data = data[data$thal!=0,]  #removing and merging very rare levels /not informative
-data$thal = factor(data$thal)
-#data$ca[data$ca==4] = 3
-data$ca = factor(data$ca)
 
 str(data) #variables
 summary(data) #variable statistics
@@ -66,7 +67,7 @@ n = nrow(data) #shuffling the data
 set.seed(104)
 data = data[sample(n),] 
 
-set.seed(46)
+set.seed(45)
 rand_rows = sample(1:nrow(data), 0.6*nrow(data)) #split into training and validation dataset
 train_data = data[rand_rows, ]
 val_data = data[-rand_rows, ]
@@ -121,23 +122,29 @@ rpart.plot(cart)
 prob_cart_train = predict(cart, train_data)
 prob_cart_test = predict(cart, val_data) #prediction
 
-perf_cart_train = performanceMeasures(prob_cart_train[,2], train_data$target, name="DECISION TREES Training")
+perf_cart_train = performanceMeasures(prob_cart_train[,2], train_data$target, name="Decision Trees Training")
 perf_cart_train
-perf_cart_test = performanceMeasures(prob_cart_test[,2], val_data$target, name="DECISION TREES Testing")
+perf_cart_test = performanceMeasures(prob_cart_test[,2], val_data$target, name="Decision Trees Testing")
 perf_cart_test
 
 ###NEURAL NETWORKS### ##DONE
 set.seed(69)
-nn = nnet(target~ï..age+sex+cp+trestbps+chol+fbs+restecg+thalach
+nn = nnet(target~age+sex+cp+trestbps+chol+fbs+restecg+thalach
           +exang+oldpeak+slope+ca+thal, data = train_data, size = 5, decay = 5e-4, maxit = 100)
 
 prob_nn_train = predict(nn, train_data)
 prob_nn_test = predict(nn, val_data) #prediction
 
-perf_nn_train = performanceMeasures(prob_nn_train, train_data$target, name="NEURAL NETWORKS Training")
+perf_nn_train = performanceMeasures(prob_nn_train, train_data$target, name="Neural Networks Training")
 perf_nn_train
-perf_nn_test = performanceMeasures(prob_nn_test, val_data$target, name="NEURAL NETWORKS Testing")
+perf_nn_test = performanceMeasures(prob_nn_test, val_data$target, name="Neural Networks Testing")
 perf_nn_test
+
+###Summary Replication###
+summary_rep_train=  rbind( perf_log_train, perf_cart_train, perf_nn_train)
+summary_rep_train
+summary_rep_test = rbind( perf_log_test, perf_cart_test, perf_nn_test)
+summary_rep_test
 
 ###########################
 #### Additional methods####
@@ -181,43 +188,51 @@ perf_bagtree_test
 
 ###RANDOM FOREST ##DONE
 set.seed(87)
-rf = randomForest(as.factor(target)~ï..age+sex+cp+trestbps+chol+fbs+restecg+thalach
+rf = randomForest(as.factor(target)~age+sex+cp+trestbps+chol+fbs+restecg+thalach
                   +exang+oldpeak+slope+ca+thal, nodesize = 1 ,data = train_data, proximity = TRUE)
 
 prob_rf_train = predict(rf, train_data, type='prob') # returns probabilities not 0,1 values with type="prob"
 prob_rf_test = predict(rf, val_data, type='prob')
 
-perf_rf_train = performanceMeasures(prob_rf_train[,2], train_data$target, name="RANDOM FOREST Training")
+perf_rf_train = performanceMeasures(prob_rf_train[,2], train_data$target, name="Random Forest Training")
 perf_rf_train
-perf_rf_test = performanceMeasures(prob_rf_test[,2], val_data$target, name="RANDOM FOREST Testing")
+perf_rf_test = performanceMeasures(prob_rf_test[,2], val_data$target, name="Random Forest Testing")
 perf_rf_test
+
+### Summary Additional methods####
+
+summary_add_train=  rbind(perf_cart_train, perf_bagtree_train, perf_rf_train)
+summary_add_train
+summary_add_test = rbind( perf_cart_test, perf_bagtree_test, perf_rf_test)
+summary_add_test
 
 ######################
 ####Cross-validated###
 ######################
 
 k = 100
-prob_log_train =  NULL
-prob_log_test = NULL
-perf_log_train= as.data.frame( matrix(0, ncol = 0, nrow = 0))
-perf_log_test=as.data.frame( matrix(0, ncol = 0, nrow = 0))
-prob_cart_train= NULL
-prob_cart_test= NULL
-perf_cart_train= as.data.frame( matrix(0, ncol = 0, nrow = 0))
-perf_cart_test=as.data.frame( matrix(0, ncol = 0, nrow = 0))
-prob_nn_train= NULL
-prob_nn_test= NULL
-perf_nn_train= as.data.frame( matrix(0, ncol = 0, nrow = 0))
-perf_nn_test=as.data.frame( matrix(0, ncol = 0, nrow = 0))
-prob_rf_train= NULL
-prob_rf_test= NULL
-perf_rf_train= as.data.frame( matrix(0, ncol = 0, nrow = 0))
-perf_rf_test=as.data.frame( matrix(0, ncol = 0, nrow = 0))
-prob_bagtree_train= NULL
-prob_bagtree_test= NULL
-perf_bagtree_train= as.data.frame( matrix(0, ncol = 0, nrow = 0))
-perf_bagtree_test=as.data.frame( matrix(0, ncol = 0, nrow = 0))
+cv_prob_log_train =  NULL
+cv_prob_log_test = NULL
+cv_perf_log_train= as.data.frame( matrix(0, ncol = 0, nrow = 0))
+cv_perf_log_test=as.data.frame( matrix(0, ncol = 0, nrow = 0))
+cv_prob_cart_train= NULL
+cv_prob_cart_test= NULL
+cv_perf_cart_train= as.data.frame( matrix(0, ncol = 0, nrow = 0))
+cv_perf_cart_test=as.data.frame( matrix(0, ncol = 0, nrow = 0))
+cv_prob_nn_train= NULL
+cv_prob_nn_test= NULL
+cv_perf_nn_train= as.data.frame( matrix(0, ncol = 0, nrow = 0))
+cv_perf_nn_test=as.data.frame( matrix(0, ncol = 0, nrow = 0))
+cv_prob_rf_train= NULL
+cv_prob_rf_test= NULL
+cv_perf_rf_train= as.data.frame( matrix(0, ncol = 0, nrow = 0))
+cv_perf_rf_test=as.data.frame( matrix(0, ncol = 0, nrow = 0))
+cv_prob_bagtree_train= NULL
+cv_prob_bagtree_test= NULL
+cv_perf_bagtree_train= as.data.frame( matrix(0, ncol = 0, nrow = 0))
+cv_perf_bagtree_test=as.data.frame( matrix(0, ncol = 0, nrow = 0))
 
+set.seed(345) # for replication of the cross validation
 for (i in 1:k){ #sample randomly 100 times
   n = nrow(data_cv)
   data_temp = data_cv[sample(n),] 
@@ -228,33 +243,33 @@ for (i in 1:k){ #sample randomly 100 times
   ##LOGISTISTIC ##DONE
   logit = glm(fmla, data = train_data, family = "binomial")
   try({
-    prob_log_train = predict(logit, train_data, type = "response")
-    prob_log_test = predict(logit, val_data, type = "response")
-    perf_log_train = rbind(perf_log_train, performanceMeasures(prob_log_train, train_data$target, name="Logit Training"))
-    perf_log_test = rbind(perf_log_test,performanceMeasures(prob_log_test, val_data$target, name="Logit Testing"))
+    cv_prob_log_train = predict(logit, train_data, type = "response")
+    cv_prob_log_test = predict(logit, val_data, type = "response")
+    cv_perf_log_train = rbind(cv_perf_log_train, performanceMeasures(cv_prob_log_train, train_data$target, name="Logit Training"))
+    cv_perf_log_test = rbind(cv_perf_log_test,performanceMeasures(cv_prob_log_test, val_data$target, name="Logit Testing"))
   },TRUE)
   cart = rpart(fmla, data = train_data, method = 'class')
   try({
-    prob_cart_train = predict(cart, train_data)
-    prob_cart_test = predict(cart, val_data) #prediction
-    perf_cart_train = rbind(perf_cart_train,performanceMeasures(prob_cart_train[,2], train_data$target, name="DECISION TREES Training"))
-    perf_cart_test =rbind(perf_cart_test, performanceMeasures(prob_cart_test[,2], val_data$target, name="DECISION TREES Testing"))
+    cv_prob_cart_train = predict(cart, train_data)
+    cv_prob_cart_test = predict(cart, val_data) #prediction
+    cv_perf_cart_train = rbind(cv_perf_cart_train,performanceMeasures(cv_prob_cart_train[,2], train_data$target, name="DECISION TREES Training"))
+    cv_perf_cart_test =rbind(cv_perf_cart_test, performanceMeasures(cv_prob_cart_test[,2], val_data$target, name="DECISION TREES Testing"))
     },TRUE)
-  nn = nnet(target~ï..age+sex+cp+trestbps+chol+fbs+restecg+thalach
+  nn = nnet(target~age+sex+cp+trestbps+chol+fbs+restecg+thalach
             +exang+oldpeak+slope+ca+thal, data = train_data, size = 5, decay = 5e-4, maxit = 100)
   try({
-    prob_nn_train = predict(nn, train_data)
-    prob_nn_test = predict(nn, val_data) #prediction
-    perf_nn_train =rbind(perf_nn_train, performanceMeasures(prob_nn_train, train_data$target, name="NEURAL NETWORKS Training"))
-    perf_nn_test = rbind(perf_nn_test, performanceMeasures(prob_nn_test, val_data$target, name="NEURAL NETWORKS Testing"))
+    cv_prob_nn_train = predict(nn, train_data)
+    cv_prob_nn_test = predict(nn, val_data) #prediction
+    cv_perf_nn_train =rbind(cv_perf_nn_train, performanceMeasures(cv_prob_nn_train, train_data$target, name="NEURAL NETWORKS Training"))
+    cv_perf_nn_test = rbind(cv_perf_nn_test, performanceMeasures(cv_prob_nn_test, val_data$target, name="NEURAL NETWORKS Testing"))
     },TRUE)
-  rf = randomForest(as.factor(target)~ï..age+sex+cp+trestbps+chol+fbs+restecg+thalach
+  rf = randomForest(as.factor(target)~age+sex+cp+trestbps+chol+fbs+restecg+thalach
                     +exang+oldpeak+slope+ca+thal, nodesize = 1 ,data = train_data, proximity = TRUE)
   try({
-    prob_rf_train = predict(rf, train_data, type='prob') # returns probabilities not 0,1 values with type="prob"
-    prob_rf_test = predict(rf, val_data, type='prob')
-    perf_rf_train = rbind(perf_rf_train,performanceMeasures(prob_rf_train[,2], train_data$target, name="RANDOM FOREST Training"))
-    perf_rf_test = rbind(perf_rf_test,performanceMeasures(prob_rf_test[,2], val_data$target, name="RANDOM FOREST Testing"))
+    cv_prob_rf_train = predict(rf, train_data, type='prob') # returns probabilities not 0,1 values with type="prob"
+    cv_prob_rf_test = predict(rf, val_data, type='prob')
+    cv_perf_rf_train = rbind(cv_perf_rf_train,performanceMeasures(cv_prob_rf_train[,2], train_data$target, name="RANDOM FOREST Training"))
+    cv_perf_rf_test = rbind(cv_perf_rf_test,performanceMeasures(cv_prob_rf_test[,2], val_data$target, name="RANDOM FOREST Testing"))
     },TRUE)
   
   samples<-sapply(1:ntree,
@@ -267,34 +282,47 @@ for (i in 1:k){ #sample randomly 100 times
                      }
     )
   try({
-    prob_bagtree_train = predict.bag(treelist, newdata=train_data)
-    prob_bagtree_train= as.data.frame(prob_bagtree_train)
-    prob_bagtree_train_1= rowSums(prob_bagtree_train[, seq(2, ncol(prob_bagtree_train), 2)])/length(treelist)
+    cv_prob_bagtree_train = predict.bag(treelist, newdata=train_data)
+    cv_prob_bagtree_train= as.data.frame(cv_prob_bagtree_train)
+    cv_prob_bagtree_train_1= rowSums(cv_prob_bagtree_train[, seq(2, ncol(cv_prob_bagtree_train), 2)])/length(treelist)
     
-    prob_bagtree_test = predict.bag(treelist, newdata=val_data)
-    prob_bagtree_test= as.data.frame(prob_bagtree_test)
-    prob_bagtree_test_1= rowSums(prob_bagtree_test[, seq(2, ncol(prob_bagtree_test), 2)])/length(treelist)
+    cv_prob_bagtree_test = predict.bag(treelist, newdata=val_data)
+    cv_prob_bagtree_test= as.data.frame(cv_prob_bagtree_test)
+    cv_prob_bagtree_test_1= rowSums(cv_prob_bagtree_test[, seq(2, ncol(cv_prob_bagtree_test), 2)])/length(treelist)
     
-    perf_bagtree_train = rbind(perf_bagtree_train, performanceMeasures(prob_bagtree_train_1, train_data$target, name="Bagged Trees Training"))
-    perf_bagtree_test = rbind(perf_bagtree_test, performanceMeasures(prob_bagtree_test_1, val_data$target, name="Bagged Trees Testing"))
+    cv_perf_bagtree_train = rbind(cv_perf_bagtree_train, performanceMeasures(cv_prob_bagtree_train_1, train_data$target, name="Bagged Trees Training"))
+    cv_perf_bagtree_test = rbind(cv_perf_bagtree_test, performanceMeasures(cv_prob_bagtree_test_1, val_data$target, name="Bagged Trees Testing"))
     },TRUE)
 }
 
-summary(perf_log_train)
-summary(perf_log_test)
+summary(cv_perf_log_train)
+summary(cv_perf_log_test)
 
-summary(perf_cart_train)
-summary(perf_cart_test)
+summary(cv_perf_cart_train)
+summary(cv_perf_cart_test)
 
-summary(perf_nn_train)
-summary(perf_nn_test)
+summary(cv_perf_nn_train)
+summary(cv_perf_nn_test)
 
-summary(perf_rf_train)
-summary(perf_rf_test)
+summary(cv_perf_bagtree_train)
+summary(cv_perf_bagtree_test)
 
-summary(perf_bagtree_train)
-summary(perf_bagtree_test)
+summary(cv_perf_rf_train)
+summary(cv_perf_rf_test)
 
+cv_summary_train =rbind(summary(cv_perf_log_train),summary(cv_perf_cart_train), summary(cv_perf_nn_train), summary(cv_perf_bagtree_train), summary(cv_perf_rf_train))
+cv_summary_test =rbind(summary(cv_perf_log_test),summary(cv_perf_cart_test), summary(cv_perf_nn_test), summary(cv_perf_bagtree_test), summary(cv_perf_rf_test))
+
+boxplot(cbind(cv_perf_log_test$Accuracy, cv_perf_cart_test$Accuracy, 
+              cv_perf_nn_test$Accuracy, cv_perf_bagtree_test$Accuracy, cv_perf_rf_test$Accuracy), 
+        names= c("Logit", "Decision Trees", "Neural Networks", "Bagged Trees", "Random Forest"),
+        main= "Accuracy Cross Validation")
+
+boxplot(cbind(cv_perf_log_test$Area_under_the_curve ,cv_perf_cart_test$Area_under_the_curve, 
+              cv_perf_nn_test$Area_under_the_curve, cv_perf_bagtree_test$Area_under_the_curve,
+              cv_perf_rf_test$Area_under_the_curve),
+        names= c("Logit", "Decision Trees", "Neural Networks", "Bagged Trees", "Random Forest"),
+        main= "Area under the Curve Cross Validation")
 
 ###XGBOOST### ##DONE
 sparse_matrix = sparse.model.matrix(target ~ ., data = train_data)[,-1] #dummy contrast coding of categorical variables to fit the xgboost
@@ -340,14 +368,14 @@ mytune = tuneParams(learner = lrn, task = traintask, resampling = rdesc,
 lrn_tune = setHyperPars(lrn, par.vals = mytune$x)
 set.seed(11)
 xgmodel = train(learner = lrn_tune, task = traintask)
-xgpred = predict(xgmodel,testtask)
-acc_xgboost = confusionMatrix(xgpred$data$response,xgpred$data$truth)$overall[1]
-er_xgboost = mean(xgpred$data$response != xgpred$data$truth)
 
-auc = generateThreshVsPerfData(xgpred, measures = list(fpr, tpr, mmce))
-plotROCCurves(auc)
-auc_xgboost = mlr::performance(xgpred, mlr::auc)
+prob_xg_train = predict(xgmodel,traintask) 
+prob_xg_test = predict(xgmodel,testtask)
 
+perf_xg_train = performanceMeasures(prob_xg_train$data$prob.1, prob_xg_train$data$truth, name="Gradient Boosting Training")
+perf_xg_train
+perf_xg_test  = performanceMeasures(prob_xg_test$data$prob.1, prob_xg_test$data$truth, name="Gradient Boosting Testing")
+perf_xg_test
 
 ##NNET
 traintask = makeClassifTask(data = train_data, target = "target")
@@ -373,52 +401,34 @@ mytune = tuneParams(learner = lrn, task = traintask, resampling = rdesc,
 mytune$y
 
 lrn_tune = setHyperPars(lrn, par.vals = mytune$x)
-set.seed(95)
 nnetmodel = train(learner = lrn_tune, task = traintask)
 nnetpred = predict(nnetmodel,testtask)
-acc_nn = confusionMatrix(nnetpred$data$response,nnetpred$data$truth)$overall[1]
-er_nn = mean(nnetpred$data$response != nnetpred$data$truth)
 
-auc = generateThreshVsPerfData(nnetpred, measures = list(fpr, tpr, mmce))
-plotROCCurves(auc)
-auc_nn = mlr::performance(nnetpred, mlr::auc)
+prob_nnTu_train = predict(nnetmodel,traintask) 
+prob_nnTu_test = predict(nnetmodel,testtask)
+
+perf_nnTu_train = performanceMeasures(prob_nnTu_train$data$prob.1, prob_nnTu_train$data$truth, name="Neural Networks Tuned Training")
+perf_nnTu_train
+perf_nnTu_test  = performanceMeasures(prob_nnTu_test$data$prob.1, prob_nnTu_test$data$truth,name="Neural Networks Tuned Testing")
+perf_nnTu_test
+
+### Summary Parameter Tuning ###
+summary_tun_train=  rbind(perf_xg_train, perf_nn_train, perf_nnTu_train)
+summary_tun_train
+summary_tun_test = rbind(perf_xg_test, perf_nn_test, perf_nnTu_test)
+summary_tun_test
 
 ################
 ###STATISTICS###
 ################
+summary_rep_train
+summary_rep_test
 
-###NEW###
-print(mean(acc_log, na.rm = TRUE))
-print(acc_cart)
-print(acc_nn)
-print(acc_xgboost)
-print(acc_rf)
+summary_add_train
+summary_add_test
 
-print(mean(er_log, na.rm = TRUE))
-print(er_cart)
-print(er_nn)
-print(er_xgboost)
-print(er_rf)
+cv_summary_train 
+cv_summary_test
 
-print(mean(auc_log, na.rm = TRUE))
-print(auc_cart)
-print(auc_nn)
-print(auc_xgboost)
-print(auc_rf)
-
-print(mean(cut_log, na.rm = TRUE))
-print(cut_cart)
-print(cut_rf)
-
-###OLD###
-print(acc_log_old)
-print(acc_cart_old)
-print(acc_nn_old)
-
-print(er_log_old)
-print(er_cart_old)
-print(er_nn_old)
-
-print(auc_log_old)
-print(auc_cart_old)
-print(auc_nn_old)
+summary_tun_train
+summary_tun_test
