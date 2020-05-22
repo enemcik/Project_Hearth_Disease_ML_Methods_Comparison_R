@@ -234,8 +234,8 @@ cv_perf_bagtree_test=as.data.frame( matrix(0, ncol = 0, nrow = 0))
 
 set.seed(345) # for replication of the cross validation
 for (i in 1:k){ #sample randomly 100 times
-  n = nrow(data_cv)
-  data_temp = data_cv[sample(n),] 
+  n = nrow(data)
+  data_temp = data[sample(n),] 
   rand_rows = sample(1:nrow(data_temp), 0.7*nrow(data_temp)) #split into training and validation dataset
   train_data = data_temp[rand_rows, ]
   val_data = data_temp[-rand_rows, ]
@@ -297,18 +297,23 @@ for (i in 1:k){ #sample randomly 100 times
 
 summary(cv_perf_log_train)
 summary(cv_perf_log_test)
+apply(cv_perf_log_test[,-1], 2, sd) # Standard deviation of performance measure values in test set
 
 summary(cv_perf_cart_train)
 summary(cv_perf_cart_test)
+apply(cv_perf_cart_test[,-1], 2, sd)
 
 summary(cv_perf_nn_train)
 summary(cv_perf_nn_test)
+apply(cv_perf_nn_test[,-1], 2, sd)
 
 summary(cv_perf_bagtree_train)
 summary(cv_perf_bagtree_test)
+apply(cv_perf_bagtree_test[,-1], 2, sd)
 
 summary(cv_perf_rf_train)
 summary(cv_perf_rf_test)
+apply(cv_perf_rf_test[,-1], 2, sd)
 
 cv_summary_train =rbind(summary(cv_perf_log_train),summary(cv_perf_cart_train), summary(cv_perf_nn_train), summary(cv_perf_bagtree_train), summary(cv_perf_rf_train))
 cv_summary_test =rbind(summary(cv_perf_log_test),summary(cv_perf_cart_test), summary(cv_perf_nn_test), summary(cv_perf_bagtree_test), summary(cv_perf_rf_test))
@@ -317,6 +322,12 @@ boxplot(cbind(cv_perf_log_test$Accuracy, cv_perf_cart_test$Accuracy,
               cv_perf_nn_test$Accuracy, cv_perf_bagtree_test$Accuracy, cv_perf_rf_test$Accuracy), 
         names= c("Logit", "Decision Trees", "Neural Networks", "Bagged Trees", "Random Forest"),
         main= "Accuracy Cross Validation")
+
+boxplot(cbind(cv_perf_log_test$error ,cv_perf_cart_test$error, 
+              cv_perf_nn_test$error, cv_perf_bagtree_test$error,
+              cv_perf_rf_test$error),
+        names= c("Logit", "Decision Trees", "Neural Networks", "Bagged Trees", "Random Forest"),
+        main= "Error Cross Validation")
 
 boxplot(cbind(cv_perf_log_test$Area_under_the_curve ,cv_perf_cart_test$Area_under_the_curve, 
               cv_perf_nn_test$Area_under_the_curve, cv_perf_bagtree_test$Area_under_the_curve,
