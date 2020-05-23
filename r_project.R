@@ -380,6 +380,8 @@ nnetpred = predict(nnetmodel,testtask)
 acc_nn = confusionMatrix(nnetpred$data$response,nnetpred$data$truth)$overall[1]
 er_nn = mean(nnetpred$data$response != nnetpred$data$truth)
 
+performanceMeasures(nnetpred$data$prob.1,nnetpred$data$truth)
+
 auc = generateThreshVsPerfData(nnetpred, measures = list(fpr, tpr, mmce))
 plotROCCurves(auc)
 auc_nn = mlr::performance(nnetpred, mlr::auc)
